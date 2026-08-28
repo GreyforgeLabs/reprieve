@@ -1,0 +1,238 @@
+#!/usr/bin/env python3
+"""Mute this window's PipeWire streams and pause matching MPRIS players.
+
+Stdlib + pactl + busctl. playerctl is not required. Chrome often shares one
+process across windows, so parking one Chrome window may mute all Chrome audio.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+
+# Hard cap so a wedged PipeWire/DBus after sleep cannot stall omarchy-shell.
+LIMIT_S = 2.0
+_deadline = 0.0
+
+
+def begin() -> None:
+    global _deadline
+    _deadline = time.monotonic() + LIMIT_S
+
+
+def remaining() -> float:
+    return _deadline - time.monotonic()
+
+
+def descendants(root: int) -> set[int]:
+    pids = {root} if root > 0 else set()
+    if not pids:
+        return pids
+    children: dict[int, list[int]] = {}
+    proc = "/proc"
+    try:
+        names = os.listdir(proc)
+    except OSError:
+        return pids
+    for name in names:
+        if not name.isdigit():
+            continue
+        child = int(name)
+        try:
+            with open(f"{proc}/{child}/stat", "rt", encoding="utf-8") as fh:
+                stat = fh.read()
+            close = stat.rfind(")")
+            fields = stat[close + 2 :].split()
+            ppid = int(fields[1])
+        except (OSError, IndexError, ValueError):
+            continue
+        children.setdefault(ppid, []).append(child)
+    stack = list(pids)
+    while stack:
+        current = stack.pop()
+        for child in children.get(current, []):
+            if child not in pids:
+                pids.add(child)
+                stack.append(child)
+    return pids
+
+
+def parse_sink_inputs(text: str) -> list[dict]:
+    out: list[dict] = []
+    current: dict | None = None
+    index_re = re.compile(r"^Sink Input #(\d+)")
+    for line in text.splitlines():
+        match = index_re.match(line)
+        if match:
+            if current:
+                out.append(current)
+            current = {"index": int(match.group(1)), "mute": False, "pid": 0, "name": "", "binary": ""}
+            continue
+        if current is None:
+            continue
+        stripped = line.strip()
+        if stripped.startswith("Mute:"):
+            current["mute"] = stripped.split(":", 1)[1].strip().lower() in ("yes", "true", "1")
+        elif "application.process.id" in stripped:
+            value = stripped.split("=", 1)[-1].strip().strip('"')
+            try:
+                current["pid"] = int(value)
+            except ValueError:
+                current["pid"] = 0
+        elif stripped.startswith("application.name"):
+            current["name"] = stripped.split("=", 1)[-1].strip().strip('"')
+        elif "application.process.binary" in stripped:
+            current["binary"] = stripped.split("=", 1)[-1].strip().strip('"')
+    if current:
+        out.append(current)
+    return out
+
+
+def run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+    left = remaining()
+    if left <= 0:
+        return subprocess.CompletedProcess(cmd, 1, "", "timeout")
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=min(1.0, left))
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(cmd, 1, "", "timeout")
+
+
+def mpris_names() -> list[str]:
+    result = run(["busctl", "--user", "list"])
+    if result.returncode != 0:
+        return []
+    prefix = "org.mpris.MediaPlayer2."
+    names = []
+    for line in result.stdout.splitlines():
+        name = line.split()[0] if line.split() else ""
+        if name.startswith(prefix):
+            names.append(name)
+    return names
+
+
+def mpris_status(name: str) -> str:
+    result = run([
+        "busctl", "--user", "get-property", name,
+        "/org/mpris/MediaPlayer2", "org.mpris.MediaPlayer2.Player", "PlaybackStatus",
+    ])
+    if result.returncode != 0:
+        return ""
+    # s "Playing"
+    text = result.stdout.strip()
+    if '"' in text:
+        return text.split('"')[1]
+    return text.replace("s ", "", 1).strip()
+
+
+def mpris_call(name: str, method: str) -> None:
+    run([
+        "busctl", "--user", "call", name,
+        "/org/mpris/MediaPlayer2", "org.mpris.MediaPlayer2.Player", method,
+    ])
+
+
+def class_tokens(klass: str) -> list[str]:
+    k = (klass or "").lower()
+    tokens = [k]
+    if "chrome" in k or "chromium" in k or "brave" in k:
+        tokens.extend(["chrom", "brave", "google-chrome"])
+    if "firefox" in k:
+        tokens.extend(["firefox", "gecko"])
+    if "spotify" in k:
+        tokens.append("spotify")
+    if "mpv" in k:
+        tokens.append("mpv")
+    if "vlc" in k:
+        tokens.append("vlc")
+    return [t for t in tokens if t]
+
+
+def player_matches(name: str, pids: set[int], klass: str) -> bool:
+    low = name.lower()
+    for pid in pids:
+        if str(pid) and str(pid) in low:
+            return True
+    tokens = class_tokens(klass)
+    short = low.split("org.mpris.mediaplayer2.", 1)[-1]
+    for token in tokens:
+        if token and token in short:
+            return True
+    return False
+
+
+def pause(pid: int, klass: str) -> dict:
+    begin()
+    pids = descendants(pid)
+    muted: list[dict] = []
+    listed = run(["pactl", "list", "sink-inputs"])
+    if listed.returncode == 0:
+        for sink in parse_sink_inputs(listed.stdout):
+            if sink["pid"] not in pids or sink["mute"]:
+                continue
+            setm = run(["pactl", "set-sink-input-mute", str(sink["index"]), "1"])
+            if setm.returncode == 0:
+                muted.append({"index": sink["index"], "pid": sink["pid"]})
+    paused: list[str] = []
+    for name in mpris_names():
+        if mpris_status(name) != "Playing":
+            continue
+        if not player_matches(name, pids, klass):
+            continue
+        mpris_call(name, "Pause")
+        paused.append(name)
+    return {"muted": muted, "paused": paused}
+
+
+def resume(payload: dict) -> dict:
+    begin()
+    muted = payload.get("muted") or []
+    paused = payload.get("paused") or []
+    listed = run(["pactl", "list", "sink-inputs"])
+    sinks = parse_sink_inputs(listed.stdout) if listed.returncode == 0 else []
+    by_index = {s["index"]: s for s in sinks}
+    unmuted = 0
+    for item in muted:
+        index = int(item.get("index") or 0)
+        pid = int(item.get("pid") or 0)
+        sink = by_index.get(index)
+        if not sink:
+            continue
+        if pid and sink["pid"] and sink["pid"] != pid:
+            continue
+        run(["pactl", "set-sink-input-mute", str(index), "0"])
+        unmuted += 1
+    played = 0
+    for name in paused:
+        if mpris_status(name) == "Paused":
+            mpris_call(name, "Play")
+            played += 1
+    return {"unmuted": unmuted, "played": played}
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("action", choices=["pause", "resume"])
+    parser.add_argument("--pid", type=int, default=0)
+    parser.add_argument("--class-name", default="")
+    parser.add_argument("--payload", default="")
+    args = parser.parse_args()
+    if args.action == "pause":
+        json.dump(pause(args.pid, args.class_name), sys.stdout)
+        return 0
+    payload = {}
+    if args.payload:
+        payload = json.loads(args.payload)
+    else:
+        raw = sys.stdin.read().strip()
+        payload = json.loads(raw) if raw else {}
+    json.dump(resume(payload), sys.stdout)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
