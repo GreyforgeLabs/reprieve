@@ -121,6 +121,40 @@ toggles the top-right toast, **Esc** closes.
 Restore puts the window back tiled or floating as it was, re-applies the exact
 fullscreen state it had, focuses it, and unmutes audio Reprieve paused.
 
+## Bar widget
+
+Super+W is minimize, so the bar shows where the window went. Reprieve's bar
+widget (placed automatically on install) has three parts:
+
+- a glyph that turns to the theme's alert color while something needs you
+  (not set up yet, a legacy block still present, bindings not loaded, or a
+  hidden window with no timeline entry) — click it and it takes you there;
+- one **app icon per parked window**, newest first: click restores that
+  window where it was, right-click restores it to the current workspace;
+- a `+N` count when more windows are parked than icons shown.
+
+Left-click the glyph for the timeline, right-click to restore the last parked
+window, middle-click to restore everything. The widget pulses briefly when a
+window is parked and hides itself when nothing is parked.
+
+```sh
+reprieve bar status              # where it is, what is on
+reprieve bar tray off            # count only, no per-window icons
+reprieve bar hide-idle off       # keep the glyph visible when idle
+reprieve bar icons 8             # icons before collapsing into +N (1–10)
+reprieve bar show off            # no bar presence at all (service keeps running)
+reprieve bar install left        # place it (or move it) — see below
+```
+
+Drag it along the bar like any other widget, or `omarchy bar move
+tech.greyforge.reprieve --section center`.
+
+Upgrading from 1.0? Omarchy keeps a bar widget's config entry in the bar
+layout, and 1.0 installs have theirs in `plugins[]`. `reprieve bar install`
+moves it using Omarchy's own enable/disable (the service restarts for a
+second; the recovery journal carries parked windows across) and re-applies
+your settings.
+
 ## Crash and reload recovery
 
 Reprieve keeps a small recovery journal at
@@ -162,6 +196,8 @@ reprieve install-binds Non-interactive install (--undo/--redo/--timeline KEY,
                        --skip a,b, --replace a,b)
 reprieve remove-binds  Remove Reprieve's marked block, nothing else
 reprieve uninstall     Restore parked windows, remove bindings
+reprieve bar ...       Bar widget: status, install, show/tray/hide-idle on|off, icons N
+reprieve set KEY VALUE Change a setting
 reprieve doctor        Read-only health check
 ```
 
@@ -188,7 +224,8 @@ PASS
 
 ## Settings
 
-On Reprieve's entry in the `plugins[]` array of `~/.config/omarchy/shell.json`:
+On Reprieve's entry in `~/.config/omarchy/shell.json` (in the bar layout once
+the widget is placed, otherwise in `plugins[]`) — or with `reprieve set KEY VALUE`:
 
 | Key                | Default | What it does                                              |
 | ------------------ | ------- | --------------------------------------------------------- |
@@ -196,9 +233,13 @@ On Reprieve's entry in the `plugins[]` array of `~/.config/omarchy/shell.json`:
 | `pauseMediaOnPark` | `true`  | Mute that window's PipeWire streams / pause its MPRIS player; resume on restore. |
 | `trackAppClose`    | `true`  | Record title-bar closes of allowlisted apps as Reopen entries. |
 | `showToast`        | `true`  | Top-right park/restore toast. Also toggled with **T**.    |
+| `showInBar`        | `true`  | Show the bar widget at all.                               |
+| `barTray`          | `true`  | Per-window app icons in the bar (off = glyph + count).    |
+| `barMaxIcons`      | `5`     | Icons shown before collapsing into `+N`, 1–10.            |
+| `hideBarWhenIdle`  | `true`  | Hide the widget when nothing is parked and nothing needs attention. |
 
 ```json
-{ "id": "tech.greyforge.reprieve", "maxStack": 10, "pauseMediaOnPark": true }
+{ "id": "tech.greyforge.reprieve", "maxStack": 10, "pauseMediaOnPark": true, "barTray": true }
 ```
 
 The overlay follows the current Omarchy theme; there are no color settings.

@@ -4,6 +4,23 @@ All notable changes to Reprieve. Versions follow SemVer.
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-09-11
+
+### Added
+- Bar widget (`kinds: bar-widget`, placed in the right section on install):
+  glyph with `+N` overflow, per-window app icons that restore on click
+  (right-click restores here), alert color + tooltip when setup, a legacy
+  block, unloaded bindings, or a stranded window needs attention; pulses on
+  park; hides when idle.
+- Settings `showInBar`, `barTray`, `barMaxIcons`, `hideBarWhenIdle`; `reprieve
+  set KEY VALUE`; `reprieve bar status|install|show|tray|hide-idle|icons`.
+- `strandedCount`, `attention`, `restoreAddress` and `windowParked` on the
+  service; `settings`/`setSetting`/`restoreAddress` IPC.
+
+### Changed
+- Settings are read from wherever Omarchy keeps the plugin's entry (bar layout
+  or `plugins[]`). Existing installs move the entry with `reprieve bar install`.
+
 ## [1.0.0] — 2026-09-11
 
 First release.

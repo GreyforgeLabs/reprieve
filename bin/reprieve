@@ -49,8 +49,65 @@ Usage: reprieve <command>
   install-binds Install keybindings non-interactively (see --help)
   remove-binds  Remove Reprieve's keybinding block
   uninstall     Restore parked windows and remove keybindings
+  bar           Bar widget: status | install [left|center|right] |
+                show on|off | tray on|off | hide-idle on|off | icons N
+  set KEY VALUE Change a setting (maxStack, pauseMediaOnPark, trackAppClose,
+                showToast, showInBar, barTray, hideBarWhenIdle, barMaxIcons)
   doctor        Check the installation without changing anything
 USAGE
+}
+
+bar_cmd() {
+  local sub="${1:-status}"
+  shift || true
+  case "$sub" in
+    status)
+      need_plugin status | python3 -c '
+import json, sys
+d = json.load(sys.stdin); b = d.get("bar") or {}
+print("placed in bar   " + ("yes" if b.get("placed") else "no (run: reprieve bar install)"))
+print("show            " + ("on" if b.get("show", True) else "off"))
+print("tray icons      " + ("on" if b.get("tray", True) else "off") + " (max " + str(b.get("maxIcons", 5)) + ")")
+print("hide when idle  " + ("on" if b.get("hideWhenIdle", True) else "off"))
+print("parked          " + str(d.get("parked", 0)))'
+      ;;
+    install)
+      # A plugin with a bar-widget kind keeps its one config entry in the bar
+      # layout. Existing service-only installs have it in plugins[]; Omarchy's
+      # own enable/disable is the sanctioned way to move it. The service is
+      # reloaded in between; the recovery journal carries parked windows over.
+      local section="${1:-right}"
+      case "$section" in left|center|right) ;; *) echo "reprieve: section must be left, center or right" >&2; exit 2 ;; esac
+      local saved
+      saved="$(ipc settings)"
+      if [[ "$(ipc status | python3 -c 'import json,sys; print(json.load(sys.stdin).get("entry",""))' 2>/dev/null)" == "bar" ]]; then
+        omarchy plugin enable "$PLUGIN_ID" --section "$section" >/dev/null 2>&1 || true
+        echo "reprieve: bar widget already placed"
+        exit 0
+      fi
+      omarchy plugin disable "$PLUGIN_ID" >/dev/null 2>&1 || true
+      omarchy plugin enable "$PLUGIN_ID" "$section" || { echo "reprieve: omarchy plugin enable failed" >&2; exit 1; }
+      # Re-apply settings the plugins[] entry carried, once the service is back.
+      if [[ -n "$saved" ]]; then
+        for _ in 1 2 3 4 5 6 7 8 9 10; do
+          [[ -n "$(ipc status)" ]] && break
+          sleep 0.5
+        done
+        printf '%s' "$saved" | python3 -c '
+import json, sys
+for k, v in (json.load(sys.stdin) or {}).items():
+    if k != "id": print(k, json.dumps(v))' | while read -r key value; do
+          ipc setSetting "$key" "$value" >/dev/null
+        done
+      fi
+      echo "reprieve: bar widget placed in the $section section"
+      ;;
+    show)      need_plugin setSetting showInBar "${1:-on}" ;;
+    tray)      need_plugin setSetting barTray "${1:-on}" ;;
+    hide-idle) need_plugin setSetting hideBarWhenIdle "${1:-on}" ;;
+    icons)     need_plugin setSetting barMaxIcons "${1:-5}" ;;
+    *) echo "usage: reprieve bar status|install [section]|show on|off|tray on|off|hide-idle on|off|icons N" >&2; exit 2 ;;
+  esac
 }
 
 case "$ACTION" in
@@ -106,6 +163,13 @@ case "$ACTION" in
     [[ -n "$restored" ]] && echo "reprieve: restored parked windows: $restored"
     python3 "$HERE/reprieve-binds" remove
     echo "reprieve: now run: omarchy plugin remove $PLUGIN_ID"
+    ;;
+  bar)
+    bar_cmd "$@"
+    ;;
+  set)
+    [[ $# -ge 2 ]] || { echo "usage: reprieve set KEY VALUE" >&2; exit 2; }
+    need_plugin setSetting "$1" "$2"
     ;;
   doctor)
     exec python3 "$HERE/reprieve-doctor" "$@"

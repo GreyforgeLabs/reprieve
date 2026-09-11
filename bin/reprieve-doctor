@@ -122,6 +122,14 @@ def main() -> int:
                 rows.append(("Legacy plugin", "desktop-undo still enabled", False))
                 problems.append("disable the old plugin: omarchy plugin disable io.github.greyforgelabs.desktop-undo")
 
+    # Bar widget (informational: a missing placement never fails the check)
+    if plugin_ok:
+        bar = status.get("bar") or {}
+        if bar.get("placed"):
+            rows.append(("Bar widget", "placed" + ("" if bar.get("show", True) else ", hidden by showInBar"), True))
+        else:
+            rows.append(("Bar widget", "not placed (reprieve bar install)", True))
+
     # Media helper
     media_bins = ["pactl", "busctl", "python3"]
     missing = [b for b in media_bins if shutil.which(b) is None]

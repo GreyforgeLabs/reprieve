@@ -21,6 +21,8 @@ Needs `node` and `python3`. On Omarchy it also runs `omarchy plugin validate`.
 manifest.json        Omarchy plugin manifest (service + overlay)
 Service.qml          headless service: park/restore, journal, reconciliation, events
 Panel.qml            timeline + setup overlay + toast
+BarWidget.qml        bar widget (glyph, count, per-window icon tray)
+BarIcons.js          class → app icon lookup for the tray
 ReprieveModel.js     pure model; the only place that decides what happens
 bin/reprieve         CLI and keybind wrapper
 bin/reprieve-journal atomic state file helper

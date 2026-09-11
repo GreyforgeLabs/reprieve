@@ -2,15 +2,27 @@
   "schemaVersion": 1,
   "id": "tech.greyforge.reprieve",
   "name": "Reprieve",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "Greyforge Labs",
   "license": "MIT",
   "homepage": "https://github.com/GreyforgeLabs/reprieve",
   "description": "Hit Super+W by accident? Reprieve parks the window instead of killing it. Super+Z brings it back exactly as it was. Parked windows survive shell reloads.",
-  "kinds": ["service", "overlay"],
+  "kinds": [
+    "service",
+    "overlay",
+    "bar-widget"
+  ],
   "keepLoaded": true,
   "entryPoints": {
     "service": "Service.qml",
-    "overlay": "Panel.qml"
+    "overlay": "Panel.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Reprieve",
+    "description": "Parked windows: count, per-window icons to restore, setup/health indicator. Click for the timeline.",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right"
   }
 }

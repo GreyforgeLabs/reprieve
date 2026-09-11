@@ -181,6 +181,12 @@ D=$(spawn); dpid=$(prop_of "$D" pid)
 ipc parkWindow "$D" >/dev/null; sleep 0.3; kill "$dpid"; sleep 0.8
 check "P  dead parked window is dropped, not zombie" eq "$(status_field parked)|$(status_field undo)" "0|0"
 
+# bar widget state follows the service
+ipc parkWindow "$A" >/dev/null; sleep 0.4
+bar_json=$(ipc status | python3 -c 'import json,sys; b=json.load(sys.stdin).get("bar") or {}; print("ok" if isinstance(b.get("placed"), bool) and "tray" in b else "bad")')
+check "B  status reports bar placement and settings"  eq "$bar_json" "ok"
+check "B  restoreAddress (tray click path) restores the window" eq "$(ipc restoreAddress "$A" >/dev/null; sleep 0.5; ws_of "$A")" "$home_ws"
+
 # hidden workspace agrees with the model at the end
 hidden=$(clients | python3 -c "import json,sys; print(sum(1 for c in json.load(sys.stdin) if c['workspace']['name']=='$PARK'))")
 check "Z  nothing left on $PARK"                eq "$hidden" "0"

@@ -33,6 +33,10 @@ Item {
   readonly property bool pauseMediaOnPark: setting("pauseMediaOnPark", true) !== false
   readonly property bool showToast: setting("showToast", true) !== false
   readonly property bool setupDismissed: setting("setupDismissed", false) === true
+  // Bar widget preferences (also overridable per layout entry in shell.json).
+  readonly property bool barTray: setting("barTray", true) !== false
+  readonly property int barMaxIcons: Math.max(1, Math.min(10, Math.floor(Number(setting("barMaxIcons", 5)) || 5)))
+  readonly property bool hideBarWhenIdle: setting("hideBarWhenIdle", true) !== false
   readonly property string home: Quickshell.env("HOME") || ""
   readonly property string stateHome: Quickshell.env("XDG_STATE_HOME") || (home + "/.local/state")
   readonly property string stateDir: stateHome + "/reprieve"
@@ -41,6 +45,8 @@ Item {
   // Our plugins[] entry from shell.json. The third-party shell API exposes
   // no read surface for it, so it is read (never written) from disk.
   property var settingsEntry: ({})
+  property string entryLocation: ""
+  readonly property bool showInBar: setting("showInBar", true) !== false
   readonly property string session: Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE") || ""
 
   property var model: Model.createState({ max: maxStack })
@@ -51,6 +57,9 @@ Item {
   property int undoCount: 0
   property int redoCount: 0
   property int parkedCount: 0
+  // Live windows on the park workspace that no timeline entry claims.
+  property int strandedCount: 0
+  signal windowParked(string address)
   property string lastLabel: ""
   property string lastResult: ""
   property string recoveryNotice: ""
@@ -78,6 +87,19 @@ Item {
 
   readonly property bool bindsInstalled: !!(bindsStatus && bindsStatus.installed)
   readonly property bool legacyDetected: !!(bindsStatus && bindsStatus.legacy && bindsStatus.legacy.length)
+  readonly property bool bindsLive: !!(bindsStatus && bindsStatus.live && bindsStatus.live.park)
+  // Something the bar should point at: setup not done, bindings written but
+  // not loaded, a legacy block still present, or windows hidden without an
+  // entry. Empty string means all is well.
+  readonly property string attentionReason: {
+    if (strandedCount > 0) return strandedCount + " hidden window" + (strandedCount === 1 ? "" : "s") + " without a timeline entry — open the timeline to recover"
+    if (!bindsStatus) return ""
+    if (!bindsInstalled) return setupDismissed ? "" : "Reprieve is not set up — click to protect Super+W"
+    if (legacyDetected) return "An older close-parking block is still in bindings.lua — click to migrate"
+    if (bindsStatus.hyprland && !bindsLive) return "Bindings are installed but not loaded — run: hyprctl reload"
+    return ""
+  }
+  readonly property bool attention: attentionReason !== ""
 
   onMaxStackChanged: {
     if (!root.model) return
@@ -89,20 +111,52 @@ Item {
 
   // ---------------------------------------------------------------- settings
 
+  // Our entry may sit in bar.layout.<section> (a placed bar widget) or in
+  // plugins[] (service-only). The bar entry wins, matching updateEntryInline.
   function reloadSettings() {
     var found = {}
+    var where = ""
     try {
       var cfg = JSON.parse(String(shellConfigFile.text() || "{}").slice(0, 1048576) || "{}")
-      var plugins = cfg && Array.isArray(cfg.plugins) ? cfg.plugins : []
-      for (var i = 0; i < plugins.length; i++) {
-        var entry = plugins[i]
-        if (entry && entry.id === root.pluginId) {
-          for (var k in entry) found[k] = entry[k]
-          break
+      var sections = ["left", "center", "right"]
+      var layout = cfg && cfg.bar && cfg.bar.layout ? cfg.bar.layout : {}
+      for (var s = 0; s < sections.length && !where; s++) {
+        var arr = Array.isArray(layout[sections[s]]) ? layout[sections[s]] : []
+        for (var i = 0; i < arr.length; i++) {
+          if (arr[i] && arr[i].id === root.pluginId) { found = Object.assign({}, arr[i]); where = "bar"; break }
         }
+      }
+      var plugins = cfg && Array.isArray(cfg.plugins) ? cfg.plugins : []
+      for (var j = 0; j < plugins.length && !where; j++) {
+        if (plugins[j] && plugins[j].id === root.pluginId) { found = Object.assign({}, plugins[j]); where = "plugins" }
       }
     } catch (e) {}
     root.settingsEntry = found
+    root.entryLocation = where
+  }
+
+  // Settings the CLI/bar may change at runtime. Anything else is refused.
+  function setSetting(name, rawValue) {
+    var allowed = {
+      showToast: "bool", pauseMediaOnPark: "bool", trackAppClose: "bool",
+      showInBar: "bool", barTray: "bool", hideBarWhenIdle: "bool",
+      maxStack: "int", barMaxIcons: "int", setupDismissed: "bool"
+    }
+    var kind = allowed[String(name)]
+    if (!kind) return "unknown setting"
+    var value
+    if (kind === "bool") {
+      var s = String(rawValue).toLowerCase()
+      if (s === "true" || s === "on" || s === "1" || s === "yes") value = true
+      else if (s === "false" || s === "off" || s === "0" || s === "no") value = false
+      else return "expected on|off"
+    } else {
+      value = Math.floor(Number(rawValue))
+      if (!isFinite(value)) return "expected a number"
+      if (name === "maxStack") value = Model.clampMax(value)
+      if (name === "barMaxIcons") value = Math.max(1, Math.min(10, value))
+    }
+    return root.saveSetting(name, value) ? "ok" : "could not write shell.json"
   }
 
   function pluginEntry() {
@@ -160,6 +214,7 @@ Item {
     root.model = state
     root.publish()
     root.persist()
+    root.recountStranded()
   }
 
   function toast(message) {
@@ -476,6 +531,16 @@ Item {
       }
     } catch (e) {}
     root.snapshots = next
+    root.recountStranded()
+  }
+
+  function recountStranded() {
+    var n = 0
+    for (var addr in root.snapshots) {
+      var s = root.snapshots[addr]
+      if (s && s.workspace === root.parkWorkspace && Model.findParked(root.model, addr) === -1) n++
+    }
+    root.strandedCount = n
   }
 
   function patchSnapshot(address, patch) {
@@ -487,6 +552,7 @@ Item {
     for (var p in patch) existing[p] = patch[p]
     next[addr] = existing
     root.snapshots = next
+    if (patch.workspace !== undefined) root.recountStranded()
   }
 
   // ---------------------------------------------------------------- media
@@ -647,6 +713,7 @@ Item {
     root.requestPause(snapshot)
     root.lastResult = "parked"
     root.toast("Parked " + Model.toastLabel(result.action) + " — Super+Z to undo")
+    root.windowParked(snapshot.address)
     return "parked"
   }
 
@@ -685,6 +752,19 @@ Item {
     var opts = { workspace: here === true ? root.currentWorkspace() : "" }
     var result = Model.undoAt(root.model, Number(index), opts)
     return root.finishRestore(result, here === true)
+  }
+
+  function restoreAddress(address, here) {
+    var index = Model.findParked(root.model, address)
+    if (index === -1) { root.lastResult = "empty"; return "empty" }
+    return root.restoreAt(index, here === true)
+  }
+
+  function openSetup() {
+    try {
+      if (root.shell && typeof root.shell.summon === "function")
+        root.shell.summon(root.pluginId, JSON.stringify({ view: "setup" }))
+    } catch (e) {}
   }
 
   function finishRestore(result, here) {
@@ -884,6 +964,10 @@ Item {
     var summary = Model.statusSummary(root.model)
     summary.result = root.lastResult
     summary.addresses = Model.parkedAddresses(root.model)
+    summary.stranded = root.strandedCount
+    summary.attention = root.attentionReason
+    summary.entry = root.entryLocation
+    summary.bar = { placed: root.entryLocation === "bar", show: root.showInBar, tray: root.barTray, hideWhenIdle: root.hideBarWhenIdle, maxIcons: root.barMaxIcons }
     summary.journal = root.journalStatus
     summary.session = root.session ? root.session.slice(0, 12) : ""
     summary.binds = root.bindsStatus ? !!root.bindsStatus.installed : null
@@ -1085,6 +1169,12 @@ Item {
       return root.restoreAt(index, here)
     }
     function restoreAll(): string { return root.restoreAll() }
+    function restoreAddress(arg: string): string {
+      var address = arg
+      var here = false
+      try { var parsed = JSON.parse(arg || "{}"); if (parsed && parsed.address) { address = parsed.address; here = parsed.here === true } } catch (e) {}
+      return root.restoreAddress(address, here)
+    }
     function closeParked(address: string): string { return root.closeParked(address) }
     function clear(): string { return root.clearHistory() }
     function reset(): string { return root.resetAll() }
@@ -1098,6 +1188,8 @@ Item {
     function toggleShowToast(): string { var on = !root.showToast; root.setShowToast(on); return on ? "on" : "off" }
     function bindsStatus(): string { root.refreshBindStatus(); return JSON.stringify(root.bindsStatus || {}) }
     function installBinds(arg: string): string { return root.installBinds(arg) }
+    function setSetting(name: string, value: string): string { return root.setSetting(name, value) }
+    function settings(): string { return JSON.stringify(root.pluginEntry()) }
     function removeBinds(): string { return root.removeBinds() }
   }
 

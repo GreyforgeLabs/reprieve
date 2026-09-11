@@ -3,7 +3,7 @@
 # migration code (bin/reprieve-binds, bin/reprieve-doctor), docs, and tests.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-runtime=(manifest.json Service.qml Panel.qml ReprieveModel.js bin/reprieve bin/reprieve-journal bin/reprieve-media)
+runtime=(manifest.json Service.qml Panel.qml BarWidget.qml BarIcons.js ReprieveModel.js bin/reprieve bin/reprieve-journal bin/reprieve-media)
 fail=0
 for f in "${runtime[@]}"; do
   if grep -n -E "desktop-undo|greyforgelabs|forge""undo" "$f"; then
