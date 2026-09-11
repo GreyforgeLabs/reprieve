@@ -213,11 +213,22 @@ def has_dangling_marker(text: str, plugin_id: str) -> bool:
 
 
 def strip_blocks(text: str, plugin_id: str) -> tuple[str, int]:
-    pattern = block_pattern(plugin_id)
-    new_text, n = pattern.subn("", text)
-    if n:
-        new_text = re.sub(r"\n{3,}", "\n\n", new_text)
-    return new_text, n
+    """Remove every marked block for plugin_id. Only the block itself and the
+    blank-line seam it leaves behind are touched; the rest of the file is
+    byte-for-byte unchanged."""
+    spans = find_blocks(text, plugin_id)
+    for start, end in reversed(spans):
+        before, after = text[:start], text[end:]
+        if after == "":
+            # Block was at EOF: undo the single separator newline install added.
+            if before.endswith("\n\n"):
+                before = before[:-1]
+        else:
+            # Collapse a seam of more than one blank line down to one.
+            while before.endswith("\n\n") and after.startswith("\n"):
+                after = after[1:]
+        text = before + after
+    return text, len(spans)
 
 
 def text_outside_blocks(text: str) -> str:
@@ -447,8 +458,10 @@ def install(path: str, overrides: dict[str, str], skip: set[str], replace: set[s
         seen[sig] = action
 
     block = render_block(keys, list(dict.fromkeys(unbind)))
-    body = text.rstrip("\n")
-    new_text = (body + "\n\n" if body else "") + block
+    if not text:
+        new_text = block
+    else:
+        new_text = text + ("\n" if text.endswith("\n") else "\n\n") + block
     result["backup"] = write_config_atomic(path, new_text)
     result["installed"] = True
     result["keys"] = {a: pretty_key(k) for a, k in keys.items()}
@@ -490,9 +503,11 @@ def ensure_cli_link() -> str:
     if not os.path.isdir(bindir):
         return "no-local-bin"
     if os.path.islink(link):
-        if os.readlink(link) == target:
+        current = os.readlink(link)
+        if current == target:
             return "ok"
-        if plugin_dir() in os.readlink(link) or "reprieve" in os.path.basename(os.readlink(link)):
+        # Only replace a link that points at a (previous) Reprieve checkout.
+        if f"/plugins/{PLUGIN_ID}/" in current:
             os.unlink(link)
         else:
             return "foreign"

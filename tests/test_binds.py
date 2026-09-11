@@ -299,6 +299,15 @@ class BindTests(unittest.TestCase):
         self.assertNotIn(BEGIN, final)
         self.assertNotIn("greyforgelabs", final)  # migrated away on install, by design
 
+    def test_user_config_is_byte_identical_after_install_and_remove(self):
+        for original in (USER_CONFIG, USER_CONFIG + "\n\n\n", "-- one\n\n\n\n-- two\n", "no trailing newline"):
+            self.config.write_text(original)
+            run("install", config=self.config, home=self.home)
+            self.assertTrue(self.config.read_text().startswith(original))
+            run("remove", config=self.config, home=self.home)
+            expected = original if original.endswith("\n") else original + "\n"
+            self.assertEqual(self.config.read_text(), expected)
+
     # --- cli link ----------------------------------------------------------
 
     def test_cli_link_created_and_removed_without_clobbering(self):

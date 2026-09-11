@@ -10,6 +10,7 @@ python3 tests/test_binds.py
 python3 tests/test_media.py
 python3 -m py_compile bin/reprieve-journal bin/reprieve-binds bin/reprieve-doctor bin/reprieve-media
 bash -n bin/reprieve
+tests/check_namespace.sh
 if command -v omarchy >/dev/null 2>&1; then
   omarchy plugin validate .
 fi

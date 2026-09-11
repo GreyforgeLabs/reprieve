@@ -20,6 +20,10 @@ Item {
   property bool cursorActive: true
   property string confirmAddress: ""
   property string setupMessage: ""
+  // An auto-opened setup card grabs keyboard focus while the user may still
+  // be typing. Keyboard consent is disarmed for a moment so a stray Enter
+  // cannot install anything; a mouse click is always deliberate.
+  property bool armed: false
 
   readonly property color background: Color.menu.background
   readonly property color foreground: Color.menu.text
@@ -71,6 +75,8 @@ Item {
     if (requested === "setup") root.view = "setup"
     else if (requested === "timeline") root.view = "timeline"
     else root.view = root.needsSetup ? "setup" : "timeline"
+    root.armed = String(payload.source || "") !== "auto"
+    if (!root.armed) armTimer.restart()
     root.opened = true
     root.selectedIndex = 0
     root.confirmAddress = ""
@@ -153,8 +159,10 @@ Item {
     root.confirmAddress = ""
   }
 
-  function enableProtection(extra) {
+  function enableProtection(extra, fromKeyboard) {
     if (!service) return
+    if (fromKeyboard && !root.armed) return
+    root.armed = true
     root.setupMessage = "Installing…"
     service.installBinds(JSON.stringify(extra || {}))
   }
@@ -183,6 +191,7 @@ Item {
   }
 
   Timer { id: confirmTimer; interval: 3000; repeat: false; onTriggered: root.confirmAddress = "" }
+  Timer { id: armTimer; interval: 2500; repeat: false; onTriggered: root.armed = true }
   Timer { id: setupCloseTimer; interval: 1600; repeat: false; onTriggered: { if (root.view === "setup") root.view = "timeline" } }
 
   PanelWindow {
@@ -220,10 +229,10 @@ Item {
             root.dismiss(); event.accepted = true; return
           }
           if (root.view === "setup") {
-            if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) { root.enableProtection({}); event.accepted = true }
+            if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) { root.enableProtection({}, true); event.accepted = true }
             else if (event.key === Qt.Key_L) { root.laterSetup(); event.accepted = true }
-            else if (event.key === Qt.Key_A) { root.enableProtection(alternateOptions()); event.accepted = true }
-            else if (event.key === Qt.Key_R) { root.enableProtection(replaceOptions()); event.accepted = true }
+            else if (event.key === Qt.Key_A) { root.enableProtection(alternateOptions(), true); event.accepted = true }
+            else if (event.key === Qt.Key_R) { root.enableProtection(replaceOptions(), true); event.accepted = true }
             else if (event.key === Qt.Key_T && !root.needsSetup) { root.view = "timeline"; event.accepted = true }
             return
           }
@@ -313,17 +322,17 @@ Item {
           width: parent.width
           height: Math.max(Style.space(40), Style.font.body + Style.spacing.md)
           radius: Math.max(6, Style.cornerRadius - 4)
-          color: root.selectedBackground
+          color: root.armed ? root.selectedBackground : root.faint
           Text {
             anchors.centerIn: parent
             text: root.setupMessage ? root.setupMessage
               : (root.legacy.length ? "Migrate to Reprieve" : (root.needsSetup ? "Enable Protection" : "Reinstall keybindings"))
             textFormat: Text.PlainText
-            color: root.selectedText
+            color: root.armed ? root.selectedText : root.muted
             font.family: root.fontFamily
             font.pixelSize: Style.font.body
           }
-          MouseArea { anchors.fill: parent; onClicked: root.enableProtection({}) }
+          MouseArea { anchors.fill: parent; onClicked: root.enableProtection({}, false) }
         }
 
         Text {
@@ -363,7 +372,7 @@ Item {
         }
 
         Text {
-          text: "Enter restore  ·  Space restore here  ·  A restore all  ·  Y redo  ·  Del close permanently  ·  T toasts"
+          text: "Enter restore  ·  Space restore here  ·  A restore all  ·  Y redo  ·  Del close for good  ·  T toasts"
           color: root.muted
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption

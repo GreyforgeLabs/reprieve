@@ -36,6 +36,11 @@ Item {
   readonly property string home: Quickshell.env("HOME") || ""
   readonly property string stateHome: Quickshell.env("XDG_STATE_HOME") || (home + "/.local/state")
   readonly property string stateDir: stateHome + "/reprieve"
+  readonly property string configHome: Quickshell.env("XDG_CONFIG_HOME") || (home + "/.config")
+  readonly property string shellConfigPath: configHome + "/omarchy/shell.json"
+  // Our plugins[] entry from shell.json. The third-party shell API exposes
+  // no read surface for it, so it is read (never written) from disk.
+  property var settingsEntry: ({})
   readonly property string session: Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE") || ""
 
   property var model: Model.createState({ max: maxStack })
@@ -84,20 +89,30 @@ Item {
 
   // ---------------------------------------------------------------- settings
 
-  function pluginEntry() {
+  function reloadSettings() {
+    var found = {}
     try {
-      var cfg = root.shell && root.shell.shellConfig ? root.shell.shellConfig : null
-      var plugins = cfg && cfg.plugins ? cfg.plugins : []
+      var cfg = JSON.parse(String(shellConfigFile.text() || "{}").slice(0, 1048576) || "{}")
+      var plugins = cfg && Array.isArray(cfg.plugins) ? cfg.plugins : []
       for (var i = 0; i < plugins.length; i++) {
         var entry = plugins[i]
-        if (entry && entry.id === root.pluginId) return entry
+        if (entry && entry.id === root.pluginId) {
+          for (var k in entry) found[k] = entry[k]
+          break
+        }
       }
     } catch (e) {}
-    return null
+    root.settingsEntry = found
+  }
+
+  function pluginEntry() {
+    var entry = { id: root.pluginId }
+    for (var k in root.settingsEntry) entry[k] = root.settingsEntry[k]
+    return entry
   }
 
   function setting(name, fallback) {
-    var entry = root.pluginEntry()
+    var entry = root.settingsEntry
     if (entry && entry[name] !== undefined && entry[name] !== null) return entry[name]
     return fallback
   }
@@ -105,10 +120,12 @@ Item {
   function saveSetting(name, value) {
     try {
       if (!root.shell || typeof root.shell.updateEntryInline !== "function") return false
-      var entry = root.pluginEntry() || { id: root.pluginId }
-      var next = {}
-      for (var k in entry) next[k] = entry[k]
+      var next = root.pluginEntry()
       next[name] = value
+      // Reflect immediately; the shell.json watcher confirms shortly after.
+      var local = {}
+      for (var k in next) local[k] = next[k]
+      root.settingsEntry = local
       return root.shell.updateEntryInline(root.pluginId, next) !== false
     } catch (e) {
       console.warn("reprieve: saveSetting failed", e)
@@ -332,9 +349,10 @@ Item {
     return ""
   }
 
-  function hyprDispatch(lua, legacy) {
+  // Omarchy 4 / Hyprland 0.56 is Lua-config only; there is no legacy path.
+  function hyprDispatch(lua) {
     try {
-      Hyprland.dispatch(Hyprland.usingLua ? lua : legacy)
+      Hyprland.dispatch(lua)
     } catch (e) {
       console.warn("reprieve: dispatch failed", e)
     }
@@ -351,8 +369,7 @@ Item {
     if (!addr) return
     var value = on ? "1" : "0"
     root.hyprDispatch(
-      'hl.dsp.window.set_prop({ ' + root.windowSel(addr) + ', prop = "no_anim", value = "' + value + '" })',
-      "setprop address:" + addr + " noanim " + value)
+      'hl.dsp.window.set_prop({ ' + root.windowSel(addr) + ', prop = "no_anim", value = "' + value + '" })')
   }
 
   function moveSilent(address, workspace) {
@@ -362,17 +379,17 @@ Item {
     root.expect(addr, "move")
     root.setNoAnim(addr, true)
     root.hyprDispatch(
-      'hl.dsp.window.move({ ' + root.windowSel(addr) + ', workspace = "' + ws + '", follow = false })',
-      "movetoworkspacesilent " + ws + ",address:" + addr)
+      'hl.dsp.window.move({ ' + root.windowSel(addr) + ', workspace = "' + ws + '", follow = false })')
     return true
   }
 
+  // Hyprland 0.56's window.float parses "enable"/"disable"/"toggle"; any
+  // other word (including "set") silently means toggle.
   function setFloating(address, floating) {
     var addr = Model.normalizeAddress(address)
     if (!addr) return
     root.hyprDispatch(
-      'hl.dsp.window.float({ ' + root.windowSel(addr) + ', action = "' + (floating ? "set" : "unset") + '" })',
-      (floating ? "setfloating" : "settiled") + " address:" + addr)
+      'hl.dsp.window.float({ ' + root.windowSel(addr) + ', action = "' + (floating ? "enable" : "disable") + '" })')
   }
 
   function setFullscreen(address, internal, client) {
@@ -381,14 +398,13 @@ Item {
     var i = Math.max(0, Math.min(2, Math.floor(Number(internal) || 0)))
     var c = Math.max(0, Math.min(2, Math.floor(Number(client) || 0)))
     root.hyprDispatch(
-      'hl.dsp.window.fullscreen_state({ ' + root.windowSel(addr) + ', internal = ' + i + ', client = ' + c + ', action = "set" })',
-      "fullscreenstate " + i + " " + c)
+      'hl.dsp.window.fullscreen_state({ ' + root.windowSel(addr) + ', internal = ' + i + ', client = ' + c + ', action = "set" })')
   }
 
   function focusWindow(address) {
     var addr = Model.normalizeAddress(address)
     if (!addr) return
-    root.hyprDispatch('hl.dsp.focus({ ' + root.windowSel(addr) + ' })', "focuswindow address:" + addr)
+    root.hyprDispatch('hl.dsp.focus({ ' + root.windowSel(addr) + ' })')
   }
 
   function closeWindow(address) {
@@ -396,7 +412,7 @@ Item {
     if (!addr) return
     root.expect(addr, "close")
     root.setNoAnim(addr, true)
-    root.hyprDispatch('hl.dsp.window.close({ ' + root.windowSel(addr) + ' })', "closewindow address:" + addr)
+    root.hyprDispatch('hl.dsp.window.close({ ' + root.windowSel(addr) + ' })')
   }
 
   function liveHandle(address) {
@@ -481,13 +497,28 @@ Item {
   }
 
   function pumpMedia() {
-    if (mediaProcess.running || root.mediaQueue.length === 0) return
-    var job = root.mediaQueue[0]
-    root.mediaQueue = root.mediaQueue.slice(1)
-    root.mediaJobKind = job.kind
-    root.mediaJobAddress = job.address
-    mediaProcess.command = job.args
-    mediaProcess.running = true
+    while (!mediaProcess.running && root.mediaQueue.length > 0) {
+      var job = root.mediaQueue[0]
+      root.mediaQueue = root.mediaQueue.slice(1)
+      if (job.kind === "close") {
+        // Queued behind the resume job so the stream is unmuted before it dies.
+        root.closeWindow(job.address)
+        continue
+      }
+      root.mediaJobKind = job.kind
+      root.mediaJobAddress = job.address
+      mediaProcess.command = job.args
+      mediaProcess.running = true
+    }
+  }
+
+  // Close a window Reprieve may have muted: unmute first, then close.
+  function closeAfterMedia(address, media) {
+    var clean = Model.sanitizeMedia(media)
+    if (!clean || !root.pauseMediaOnPark) { root.closeWindow(address); return }
+    root.requestResume(clean)
+    root.mediaQueue = root.mediaQueue.concat([{ kind: "close", address: Model.normalizeAddress(address) }])
+    root.pumpMedia()
   }
 
   function stopMedia() {
@@ -521,10 +552,20 @@ Item {
 
   // -------------------------------------------------------------- effects
 
-  function applyKills(addresses) {
+  // Before Reprieve closes a window it muted, unmute it: PipeWire's
+  // stream-restore remembers mute per application, so a stream that dies
+  // muted would come back muted the next time that app plays.
+  function mediaFor(state, address) {
+    var index = Model.findParked(state, address)
+    if (index === -1) return null
+    var action = state.undo[index]
+    return action ? action.media : null
+  }
+
+  function applyKills(addresses, previousState) {
     for (var i = 0; i < (addresses || []).length; i++) {
       if (!root.liveHandle(addresses[i])) continue
-      root.closeWindow(addresses[i])
+      root.closeAfterMedia(addresses[i], previousState ? root.mediaFor(previousState, addresses[i]) : null)
     }
   }
 
@@ -585,20 +626,24 @@ Item {
   // -------------------------------------------------------------- actions
 
   function parkActive() {
-    var snapshot = root.activeSnapshot()
-    if (!snapshot || !snapshot.address) {
-      root.lastResult = "empty"
-      return "empty"
-    }
-    var result = Model.pushPark(root.model, snapshot)
-    if (result.reason !== "parked") {
-      root.lastResult = "passthrough"
-      return "passthrough"
-    }
+    var handle = null
+    try { handle = Hyprland.activeToplevel } catch (e) {}
+    if (!handle) { root.lastResult = "empty"; return "empty" }
+    return root.parkWindow(handle.address)
+  }
+
+  // Park a specific window by address (IPC only; used by tests and tools).
+  function parkWindow(address) {
+    var handle = root.liveHandle(address)
+    if (!handle) { root.lastResult = "empty"; return "empty" }
+    var snapshot = root.snapshotFromHandle(handle)
+    var previous = root.model
+    var result = Model.pushPark(previous, snapshot)
+    if (result.reason !== "parked") { root.lastResult = "passthrough"; return "passthrough" }
     root.commit(result.state)
     if (snapshot.fullscreen > 0) root.setFullscreen(snapshot.address, 0, 0)
     root.moveSilent(snapshot.address, root.parkWorkspace)
-    root.applyKills(result.kills)
+    root.applyKills(result.kills, previous)
     root.requestPause(snapshot)
     root.lastResult = "parked"
     root.toast("Parked " + Model.toastLabel(result.action) + " — Super+Z to undo")
@@ -625,7 +670,7 @@ Item {
     }
     var action = root.model.undo[index]
     root.commit(Model.dropAddress(root.model, action.address))
-    root.closeWindow(action.address)
+    root.closeAfterMedia(action.address, action.media)
     root.lastResult = "closed"
     root.toast("Closed " + Model.toastLabel(action))
     return "closed"
@@ -660,13 +705,19 @@ Item {
   }
 
   function redoLast() {
-    var result = Model.redo(root.model)
+    var previous = root.model
+    var result = Model.redo(previous)
     if (!result.action) {
       root.lastResult = "empty"
       return "empty"
     }
     root.commit(result.state)
-    root.applyEffects(result.effects)
+    var effects = []
+    for (var i = 0; i < result.effects.length; i++) {
+      if (result.effects[i].type === "close") root.applyKills([result.effects[i].address], previous)
+      else effects.push(result.effects[i])
+    }
+    root.applyEffects(effects)
     root.lastResult = "redone"
     root.toast("Parked " + Model.toastLabel(result.action) + " — Super+Z to undo")
     return "redone"
@@ -722,14 +773,21 @@ Item {
       else if (dead.action) root.toast(Model.toastLabel(dead.action) + " closed while parked — cannot restore")
       return
     }
+    // A restored window that is closed for real leaves a redo entry
+    // pointing at nothing; drop it so redo never "parks" a dead window.
+    var redo = root.model.redo || []
+    for (var r = 0; r < redo.length; r++) {
+      if (redo[r] && redo[r].address === addr) { root.commit(Model.dropAddress(root.model, addr)); break }
+    }
     if (!root.trackAppClose) return
     var snapshot = root.snapshots[addr]
     if (!snapshot) return
     if (snapshot.openedAt && (Date.now() - snapshot.openedAt) < 800) return
-    var result = Model.pushRelaunch(root.model, snapshot)
+    var previous = root.model
+    var result = Model.pushRelaunch(previous, snapshot)
     if (result.action) {
       root.commit(result.state)
-      root.applyKills(result.kills)
+      root.applyKills(result.kills, previous)
     }
   }
 
@@ -809,8 +867,9 @@ Item {
     if (root.bindsInstalled || root.setupDismissed) return
     root.setupOffered = true
     try {
+      if (root.shell && typeof root.shell.isPluginOpen === "function" && root.shell.isPluginOpen(root.pluginId)) return
       if (root.shell && typeof root.shell.summon === "function")
-        root.shell.summon(root.pluginId, JSON.stringify({ view: "setup" }))
+        root.shell.summon(root.pluginId, JSON.stringify({ view: "setup", source: "auto" }))
     } catch (e) {}
   }
 
@@ -842,6 +901,19 @@ Item {
   Timer { id: refreshDebounce; interval: 60; repeat: false; onTriggered: { try { Hyprland.refreshToplevels() } catch (e) {}; cacheDebounce.restart() } }
 
   Timer {
+    id: adoptTimer
+    property var pending: []
+    interval: 250
+    repeat: false
+    function queue(address) { pending = pending.concat([address]); restart() }
+    onTriggered: {
+      var list = pending
+      pending = []
+      for (var i = 0; i < list.length; i++) root.adoptIfStranded(list[i])
+    }
+  }
+
+  Timer {
     id: animClear
     property var pending: []
     interval: 120
@@ -855,6 +927,17 @@ Item {
   }
 
   // ------------------------------------------------------------ processes
+
+  FileView {
+    id: shellConfigFile
+    path: root.shellConfigPath
+    watchChanges: true
+    blockLoading: true
+    printErrors: false
+    onLoaded: root.reloadSettings()
+    onFileChanged: { shellConfigFile.reload(); root.reloadSettings() }
+    onLoadFailed: root.reloadSettings()
+  }
 
   Process {
     id: journalReader
@@ -876,6 +959,7 @@ Item {
     onExited: function(code) {
       journalWriter.stdinEnabled = true
       if (code !== 0) console.warn("reprieve: journal write failed:", String(journalWriterOut.text || "").slice(0, 200))
+      else root.journalStatus = "ok"
       if (root.journalDirty) persistDebounce.restart()
     }
   }
@@ -954,6 +1038,9 @@ Item {
         var parts = data.split(",")
         var address = Model.normalizeAddress(parts[0])
         if (address) root.patchSnapshot(address, { openedAt: Date.now(), workspace: String(parts[1] || ""), class: String(parts[2] || "") })
+        // A dialog spawned by a parked app opens on the parked app's
+        // workspace, i.e. hidden. Give it a timeline entry.
+        if (address && String(parts[1] || "") === root.parkWorkspace) adoptTimer.queue(address)
         refreshDebounce.restart()
       } else if (name === "closewindow") {
         root.handleClose(data.split(",")[0])
@@ -981,6 +1068,7 @@ Item {
     target: "tech.greyforge.reprieve"
 
     function park(): string { return root.parkActive() }
+    function parkWindow(address: string): string { return root.parkWindow(address) }
     function close(): string { return root.closeActive() }
     function undo(): string { return root.undoLast() }
     function redo(): string { return root.redoLast() }
@@ -1014,6 +1102,7 @@ Item {
   }
 
   Component.onCompleted: {
+    root.reloadSettings()
     root.model = Model.createState({ max: root.maxStack })
     root.publish()
     root.cacheToplevels()
