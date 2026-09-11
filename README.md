@@ -1,55 +1,33 @@
-# Reprieve
+<p align="center">
+  <img src="docs/brand/reprieve-banner.png" alt="Reprieve — window-close recovery for Omarchy" width="100%">
+</p>
 
-Reliable window-close recovery for [Omarchy](https://omarchy.org/).
+<p align="center">
+  <a href="https://github.com/GreyforgeLabs/reprieve/actions/workflows/test.yml"><img alt="tests" src="https://github.com/GreyforgeLabs/reprieve/actions/workflows/test.yml/badge.svg"></a>
+  <a href="https://github.com/GreyforgeLabs/reprieve/releases/latest"><img alt="release" src="https://img.shields.io/github/v/release/GreyforgeLabs/reprieve?display_name=tag&color=38c8e8&labelColor=0b0f14"></a>
+  <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-aab3bc?labelColor=0b0f14"></a>
+  <img alt="Omarchy 4 plugin" src="https://img.shields.io/badge/Omarchy-4-fda52b?labelColor=0b0f14">
+</p>
 
-> Hit Super+W by accident? Reprieve parks the window instead of killing it.
-> Super+Z brings it back exactly as it was.
+<p align="center"><b>Every window deserves a second chance.</b></p>
 
-Stock Omarchy closes the focused window on `Super+W`. Reprieve turns that
-into a reversible **park**: the live application window is moved to a hidden
-workspace, not destroyed. Your browser tabs, your terminal session, your
-unsaved buffer are all still there — the same process, the same window.
+Reprieve is an Omarchy plugin that gives `Super+W` a safety net. Instead of
+terminating the window under your cursor, it tucks the running application
+away on a hidden workspace and hands you a one-keystroke way back. The tabs,
+the scrollback, the half-written message: untouched, because the process was
+never asked to quit.
 
-Reprieve is small on purpose. It is not a desktop time machine. It does one
-thing: it makes an accidental close recoverable, and it keeps that promise
-across shell reloads, plugin updates, and its own bookkeeping mistakes.
+The scope is deliberately narrow. Reprieve guards one keystroke and makes it
+reversible. It is built to keep that guarantee through `omarchy-shell`
+restarts, plugin upgrades, and its own crashes.
 
-## What Reprieve does
-
-| You press        | Reprieve does                                              |
-| ---------------- | ---------------------------------------------------------- |
-| `Super+W`        | Parks the focused window on `special:reprieve`             |
-| `Super+Z`        | Restores the most recently parked window, where it was     |
-| `Super+Y`        | Parks it again (redo)                                      |
-| `Super+Shift+Z`  | Opens the recovery timeline                                |
-| `Super+Alt+W`    | Closes the focused window for real                         |
-
-Two words matter throughout:
-
-```text
-Restore = the same live window comes back (workspace, floating, fullscreen)
-Reopen  = a safe best-effort relaunch of an app whose window is gone
-```
-
-Reopen exists only for a short allowlist (Chrome/Chromium, Brave, Firefox,
-Omarchy web apps) and only ever runs `omarchy-launch-browser` or
-`omarchy-launch-webapp https://<host>`. Reprieve never records or replays
-command lines.
-
-## Install
+## Sixty-second tour
 
 ```sh
 omarchy plugin add https://github.com/GreyforgeLabs/reprieve.git --enable
 ```
 
-Requires Omarchy 4 on Hyprland 0.56+ with Python 3 (stdlib only), `hyprctl`,
-`pactl`, and `busctl` — all present on a stock install.
-
-Enabling the plugin changes nothing about your keybindings.
-
-## First-run setup
-
-When Reprieve loads without its keybindings it opens a compact setup card:
+A compact card appears the first time Reprieve loads without its shortcuts:
 
 ```text
 Reprieve
@@ -57,153 +35,154 @@ Reprieve
 Protect Super+W from accidental closes?
 
 [ Enable Protection ]
-
-Super+W       Park window
-Super+Alt+W   Close permanently
-Super+Z       Restore
 ```
 
-Nothing is written until you press **Enable Protection** (a click, or Enter
-once the card has been visible for a moment). Reprieve then:
+Press it, and from then on:
 
-1. backs up `~/.config/hypr/bindings.lua`;
-2. appends one marked block between `-- BEGIN tech.greyforge.reprieve` and
-   `-- END tech.greyforge.reprieve`, written atomically;
-3. reloads Hyprland and verifies the bindings are live;
-4. links `~/.local/bin/reprieve` to its CLI (never over a file it did not create).
+| Keystroke        | Result                                                |
+| ---------------- | ----------------------------------------------------- |
+| `Super+W`        | Sends the focused window into reprieve (it lives on)  |
+| `Super+Z`        | Returns the latest one to its home workspace           |
+| `Super+Y`        | Sends it away again                                   |
+| `Super+Shift+Z`  | Opens the recovery timeline                           |
+| `Super+Alt+W`    | Terminates the focused window outright                |
 
-`Super+W` replaces Omarchy's stock close binding — that is the product. The
-other shortcuts are conflict-aware: if `Super+Z`, `Super+Y`, or
-`Super+Shift+Z` is already bound to something of yours, the card says so and
-offers an alternate combination (`A`), an explicit replace (`R`), or
-installation without that shortcut (Enter). A custom `Super+W` is never taken
-over without you choosing **R**.
+Your applications' own `Ctrl+Z` is never touched. Requirements are a stock
+Omarchy 4 install (Hyprland ≥ 0.56, Python 3 standard library, `hyprctl`,
+`pactl`, `busctl`); there is nothing extra to install.
 
-You can reopen the card at any time:
+## Consent first
+
+Turning the plugin on changes nothing on disk. The setup card is the
+only path that writes to `~/.config/hypr/bindings.lua`, and pressing
+**Enable Protection** (click, or Enter once the card has settled) does exactly
+this:
+
+1. Copies your `bindings.lua` to a timestamped backup.
+2. Appends a single fenced block, `-- BEGIN tech.greyforge.reprieve` through
+   `-- END tech.greyforge.reprieve`, via temp-file-and-rename so a crash
+   mid-write cannot leave you with half a file.
+3. Reloads Hyprland and confirms the shortcuts are actually live.
+4. Symlinks `~/.local/bin/reprieve` to the CLI — unless something else already
+   owns that path.
+
+`Super+W` takes over Omarchy's default close binding; that is the whole
+point. Every other shortcut is negotiated: if `Super+Z`, `Super+Y`, or
+`Super+Shift+Z` is already yours, the card names the conflict and lets you
+pick an alternate (`A`), overwrite it (`R`), or go without (Enter). A
+`Super+W` you have customised yourself is left alone unless you explicitly
+choose `R`.
+
+Bring the card back any time with `reprieve setup`. Press `L` on it to opt
+out permanently.
+
+## Restore, not relaunch
+
+Two outcomes exist in the timeline, and Reprieve is careful to tell them apart:
+
+- **Restore** — the identical live window returns: same workspace, same
+  tiled-or-floating state, same fullscreen mode, focus handed back, audio
+  unpaused.
+- **Reopen** — the window is gone (its process ended while hidden), but the
+  application is on a short list that can be relaunched safely: Chrome,
+  Chromium, Brave, Firefox, and Omarchy web apps. Only
+  `omarchy-launch-browser` and `omarchy-launch-webapp https://<host>` are ever
+  invoked. Reprieve does not record command lines and cannot replay one.
+
+## The timeline
+
+`Super+Shift+Z` shows everything Reprieve can bring back, most recent at the top.
+
+| Row type      | Meaning                                                                 |
+| ------------- | ----------------------------------------------------------------------- |
+| **Parked**    | A live window Reprieve put on the hidden workspace                      |
+| **Recovered** | A live window discovered on the hidden workspace after a reload, origin unknown; restoring lands it on your current workspace |
+| **Reopen**    | Window gone, application relaunchable                                   |
+
+Inside the overlay: **Enter** returns the row to its original workspace,
+**Space** pulls it onto the one you are looking at, **A** returns everything,
+**Y** re-parks the last one, **Del** twice on the same row terminates it for
+good, **T** toggles the corner toast, **Esc** dismisses.
+
+## The bar widget
+
+Because `Super+W` now hides rather than destroys, the bar tells you where
+things went. Reprieve's widget is placed in the right section on install and
+has three parts:
+
+- a status glyph that switches to your theme's alert colour whenever
+  attention is needed — setup incomplete, shortcuts written but not loaded,
+  or a hidden window with no timeline entry — and jumps you to the fix when
+  clicked;
+- one application icon per hidden window, newest first — left-click returns
+  it home, right-click pulls it to the current workspace;
+- a `+N` overflow once more windows are hidden than icons shown.
+
+Left-click the glyph for the timeline, right-click to bring back the latest
+window, middle-click to bring back all of them. The widget pulses when a
+window is parked and fades out entirely when there is nothing to show.
 
 ```sh
-~/.config/omarchy/plugins/tech.greyforge.reprieve/bin/reprieve setup
-# or, after setup:
-reprieve setup
+reprieve bar status           # placement and toggles
+reprieve bar hide-idle off    # stay visible even when idle
+reprieve bar tray off         # glyph and count only
+reprieve bar icons 8          # icons before collapsing to +N (1–10)
+reprieve bar show off         # remove from the bar; the service keeps running
+reprieve bar install center   # place it, or move it to another section
 ```
 
-Press `L` on the card to be left alone; it will not reappear.
+Moving to 1.1 from 1.0? Run `reprieve bar install` once; it relocates the
+plugin's config entry into the bar layout using Omarchy's own enable/disable
+cycle and carries your settings across.
 
-## Shortcuts
+## Built to survive its own failures
 
-Defaults, all editable through setup:
+State lives in a small journal at `~/.local/state/reprieve/state.json`
+(directory `0700`, file `0600`). It records the minimum needed to find a
+hidden window again — address, home workspace, class, layout flags, pid,
+ordering — plus which PipeWire streams and MPRIS players to unpause. Titles,
+command lines, and environment are never stored.
 
-| Shortcut         | Action                        |
-| ---------------- | ----------------------------- |
-| `Super+W`        | Park window                   |
-| `Super+Alt+W`    | Close window permanently      |
-| `Super+Z`        | Restore parked window         |
-| `Super+Y`        | Redo park                     |
-| `Super+Shift+Z`  | Reprieve timeline             |
+Each journal is tied to one Hyprland session. On every start Reprieve
+cross-checks three sources — the journal, Hyprland's live client list, and the
+actual contents of `special:reprieve` — then:
 
-Applications keep ordinary `Ctrl+Z`; Reprieve never binds it.
+- rebuilds the timeline from the journal, in order;
+- surfaces any untracked window sitting on the hidden workspace as **Recovered**;
+- converts entries whose process has died into **Reopen** rows when the app
+  qualifies, and drops the rest;
+- sets aside a corrupt or foreign-session journal as `state.json.<reason>.<time>`
+  and starts over from what is actually on screen.
 
-## Recovery timeline
+A hidden window whose process exits later becomes a Reopen row or is removed
+with a brief notice. Nothing stays hidden without a route back.
 
-`Super+Shift+Z` lists everything Reprieve can bring back, newest first:
+If `omarchy-shell` itself is down, `Super+W` and `Super+Alt+W` degrade to a
+plain Hyprland close rather than doing nothing.
 
-- **Parked** — a live window on the hidden workspace.
-- **Recovered** — a live window Reprieve found on the hidden workspace after a
-  reload without a record of where it came from. Restoring it lands it on
-  your current workspace.
-- **Reopen** — the window is gone but the app is on the relaunch allowlist.
-
-Keys: **Enter** restores to the original workspace, **Space** restores to the
-workspace you are on, **A** restores everything, **Y** redoes the last park,
-**Del** (twice, on the same row) closes a parked window permanently, **T**
-toggles the top-right toast, **Esc** closes.
-
-Restore puts the window back tiled or floating as it was, re-applies the exact
-fullscreen state it had, focuses it, and unmutes audio Reprieve paused.
-
-## Bar widget
-
-Super+W is minimize, so the bar shows where the window went. Reprieve's bar
-widget (placed automatically on install) has three parts:
-
-- a glyph that turns to the theme's alert color while something needs you
-  (not set up yet, bindings not loaded, or a hidden window with no timeline
-  entry) — click it and it takes you there;
-- one **app icon per parked window**, newest first: click restores that
-  window where it was, right-click restores it to the current workspace;
-- a `+N` count when more windows are parked than icons shown.
-
-Left-click the glyph for the timeline, right-click to restore the last parked
-window, middle-click to restore everything. The widget pulses briefly when a
-window is parked and hides itself when nothing is parked.
-
-```sh
-reprieve bar status              # where it is, what is on
-reprieve bar tray off            # count only, no per-window icons
-reprieve bar hide-idle off       # keep the glyph visible when idle
-reprieve bar icons 8             # icons before collapsing into +N (1–10)
-reprieve bar show off            # no bar presence at all (service keeps running)
-reprieve bar install left        # place it (or move it) — see below
-```
-
-Drag it along the bar like any other widget, or `omarchy bar move
-tech.greyforge.reprieve --section center`.
-
-Upgrading from 1.0? Omarchy keeps a bar widget's config entry in the bar
-layout, and 1.0 installs have theirs in `plugins[]`. `reprieve bar install`
-moves it using Omarchy's own enable/disable (the service restarts for a
-second; the recovery journal carries parked windows across) and re-applies
-your settings.
-
-## Crash and reload recovery
-
-Reprieve keeps a small recovery journal at
-`~/.local/state/reprieve/state.json` (directory `0700`, file `0600`). It holds
-only what is needed to find parked windows again: address, original
-workspace, class, floating/fullscreen flags, pid, order, and — when audio was
-paused — which PipeWire streams and MPRIS players to resume. No titles, no
-command lines, no environment.
-
-The journal is bound to the current Hyprland session. On start Reprieve
-reconciles three sources — the journal, the compositor's live window list,
-and whatever is actually sitting on `special:reprieve` — and:
-
-- restores journaled parked windows to the timeline in their original order;
-- exposes any stranded window on the hidden workspace as **Recovered**;
-- turns a journal entry whose window has died into a **Reopen** when the app is
-  allowlisted, and otherwise discards it;
-- quarantines a malformed or foreign-session journal (`state.json.<reason>.<time>`)
-  and rebuilds from live windows.
-
-If a parked window's process dies later, the entry becomes a Reopen or is
-removed with a short toast. Nothing is ever left hidden without a way back.
-
-## CLI
+## Command line
 
 ```text
-reprieve status        JSON: undo/redo counts, parked addresses, journal state
-reprieve park          Park the focused window (what Super+W runs)
-reprieve close         Close the focused window permanently
-reprieve undo          Restore the most recently parked window
-reprieve redo          Park it again
-reprieve timeline      Open the timeline
-reprieve restore-all   Bring every parked window back
-reprieve clear         Forget history — refuses while windows are parked
-reprieve reset         Restore every parked window, then forget history
-reprieve setup         Open the setup card (installs bindings after consent)
-reprieve install-binds Non-interactive install (--undo/--redo/--timeline KEY,
-                       --skip a,b, --replace a,b)
-reprieve remove-binds  Remove Reprieve's marked block, nothing else
-reprieve uninstall     Restore parked windows, remove bindings
-reprieve bar ...       Bar widget: status, install, show/tray/hide-idle on|off, icons N
-reprieve set KEY VALUE Change a setting
-reprieve doctor        Read-only health check
+reprieve status          JSON: counts, hidden addresses, journal health
+reprieve park            What Super+W runs
+reprieve close           Terminate the focused window
+reprieve undo            Return the most recently hidden window
+reprieve redo            Hide it again
+reprieve timeline        Open the timeline overlay
+reprieve restore-all     Return every hidden window
+reprieve clear           Forget history (refuses while anything is hidden)
+reprieve reset           Return everything, then forget history
+reprieve setup           Open the consent card
+reprieve install-binds   Non-interactive install (--undo/--redo/--timeline KEY,
+                         --skip a,b, --replace a,b)
+reprieve remove-binds    Delete Reprieve's fenced block and nothing else
+reprieve uninstall       Return hidden windows, then remove the shortcuts
+reprieve bar ...         Widget placement and toggles (see above)
+reprieve set KEY VALUE   Change a setting
+reprieve doctor          Read-only health report
 ```
 
-`park` and `close` fall back to a real Hyprland close when the shell is not
-answering, so `Super+W` never becomes a no-op while `omarchy-shell` restarts.
-
-`reprieve doctor` never modifies anything:
+`reprieve doctor` inspects and never repairs:
 
 ```text
 Reprieve Doctor
@@ -223,69 +202,64 @@ PASS
 
 ## Settings
 
-On Reprieve's entry in `~/.config/omarchy/shell.json` (in the bar layout once
-the widget is placed, otherwise in `plugins[]`) — or with `reprieve set KEY VALUE`:
+Set with `reprieve set KEY VALUE`, or edit Reprieve's entry in
+`~/.config/omarchy/shell.json` (under the bar layout once the widget is
+placed, otherwise under `plugins[]`).
 
-| Key                | Default | What it does                                              |
-| ------------------ | ------- | --------------------------------------------------------- |
-| `maxStack`         | `10`    | Parked-window cap, 1–20. Overflow closes the oldest.      |
-| `pauseMediaOnPark` | `true`  | Mute that window's PipeWire streams / pause its MPRIS player; resume on restore. |
-| `trackAppClose`    | `true`  | Record title-bar closes of allowlisted apps as Reopen entries. |
-| `showToast`        | `true`  | Top-right park/restore toast. Also toggled with **T**.    |
-| `showInBar`        | `true`  | Show the bar widget at all.                               |
-| `barTray`          | `true`  | Per-window app icons in the bar (off = glyph + count).    |
-| `barMaxIcons`      | `5`     | Icons shown before collapsing into `+N`, 1–10.            |
-| `hideBarWhenIdle`  | `true`  | Hide the widget when nothing is parked and nothing needs attention. |
+| Key                | Default | Effect                                                            |
+| ------------------ | ------- | ----------------------------------------------------------------- |
+| `maxStack`         | `10`    | How many windows may be hidden at once (1–20); the oldest is closed beyond that |
+| `pauseMediaOnPark` | `true`  | Silence the window's PipeWire streams and pause its MPRIS player while hidden |
+| `trackAppClose`    | `true`  | Turn title-bar closes of relaunchable apps into Reopen rows        |
+| `showToast`        | `true`  | Corner notice on park and return (also **T** in the timeline)     |
+| `showInBar`        | `true`  | Show the bar widget                                               |
+| `barTray`          | `true`  | Per-window icons in the bar (off = glyph and count)               |
+| `barMaxIcons`      | `5`     | Icons before collapsing into `+N` (1–10)                          |
+| `hideBarWhenIdle`  | `true`  | Fade the widget out when nothing is hidden and nothing needs attention |
 
 ```json
 { "id": "tech.greyforge.reprieve", "maxStack": 10, "pauseMediaOnPark": true, "barTray": true }
 ```
 
-The overlay follows the current Omarchy theme; there are no color settings.
+Colours follow the active Omarchy theme; there is nothing to configure there.
 
-## Security and privacy
+## Trust boundaries
 
-- No elevated privileges, no `sudo`, no network, no telemetry.
-- Window address, class, title, workspace and pid are treated as untrusted:
-  addresses and workspace names are validated before they reach a Hyprland
-  dispatch; labels are stripped of control characters and rendered as plain text.
-- No argv, environment, or command persistence. Reopen is a fixed allowlist.
-- State and config writes are atomic (temp file + rename), refuse symlinks and
-  non-regular files, and are size-bounded. Malformed state is quarantined,
-  never executed.
-- Media control runs a stdlib-only helper with a 2 s hard deadline and only
-  touches streams whose pid matches the parked window.
+- Runs as your user inside `omarchy-shell`. No elevation, no network, no telemetry.
+- Everything Hyprland reports about a window — address, class, title, workspace,
+  pid — is validated before it reaches a dispatch, and labels are rendered as
+  plain text with control characters stripped.
+- Reopen works from a fixed list. Nothing about how a program was started is
+  ever persisted.
+- Every file Reprieve writes goes through temp-file-and-rename with size
+  limits; symlinks and non-regular files are refused; unreadable state is
+  quarantined rather than parsed.
+- The audio helper is standard-library Python with a two-second hard stop, and
+  only acts on streams whose pid matches the hidden window.
 
-See [SECURITY.md](SECURITY.md) for reporting.
+Reporting: see [SECURITY.md](SECURITY.md).
 
-## Troubleshooting
+## When something looks wrong
 
-- **`Super+W` still kills windows** — run `reprieve doctor`. If bindings are
-  "installed, not live", run `hyprctl reload`. If they are not installed, run
-  `reprieve setup`.
-- **A window vanished and is not in the timeline** — `reprieve doctor` reports
-  `Stranded`; `reprieve restore-all` brings back everything on the hidden
-  workspace, tracked or not.
-- **`reprieve clear` refuses** — that is deliberate: it will not forget live
-  parked windows. Use `reprieve restore-all` or `reprieve reset`.
-- **Audio stayed muted** — the parked app's stream index changed while it was
-  hidden. Unmute in the Audio widget; Reprieve only ever unmutes streams whose
-  pid still matches.
-- **Setup says a key is in use** — pick the alternate with `A`, replace with
-  `R`, or install without it (Enter). `omarchy menu keybindings --print` shows
-  who owns what.
+| Symptom                                       | What to do                                                                 |
+| --------------------------------------------- | -------------------------------------------------------------------------- |
+| `Super+W` still terminates windows            | `reprieve doctor`. "installed, not live" → `hyprctl reload`; "not installed" → `reprieve setup` |
+| A window disappeared and is not in the timeline | `reprieve doctor` reports it under `Stranded`; `reprieve restore-all` returns everything on the hidden workspace |
+| `reprieve clear` refuses                      | Intentional — it will not forget windows that are still alive. Use `restore-all` or `reset` |
+| Audio stayed muted after a return             | The app's stream index changed while hidden. Unmute from the Audio widget; Reprieve only touches streams whose pid still matches |
+| Setup reports a shortcut in use               | `A` for the alternate, `R` to replace, Enter to skip it. `omarchy menu keybindings --print` shows the current owner |
 
-## Remove
+## Removal
 
 ```sh
-reprieve uninstall            # restores parked windows, removes the marked block
+reprieve uninstall                          # returns hidden windows, deletes the fenced block
 omarchy plugin remove tech.greyforge.reprieve
 rm -rf ~/.local/state/reprieve
 ```
 
-`uninstall` removes exactly Reprieve's block from `bindings.lua`, so `Super+W`
-returns to Omarchy's stock close.
+Only Reprieve's own block leaves `bindings.lua`; `Super+W` reverts to
+Omarchy's default close.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT — © 2026 Greyforge Labs. See [LICENSE](LICENSE).

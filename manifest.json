@@ -6,7 +6,7 @@
   "author": "Greyforge Labs",
   "license": "MIT",
   "homepage": "https://github.com/GreyforgeLabs/reprieve",
-  "description": "Hit Super+W by accident? Reprieve parks the window instead of killing it. Super+Z brings it back exactly as it was. Parked windows survive shell reloads.",
+  "description": "A safety net for Super+W on Omarchy: the window is hidden, not terminated, and one keystroke returns it exactly as it was. Survives shell restarts.",
   "kinds": [
     "service",
     "overlay",

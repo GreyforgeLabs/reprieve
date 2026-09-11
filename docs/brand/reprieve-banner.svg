@@ -1,0 +1,121 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" font-family="Adwaita Sans, Inter, Noto Sans, Liberation Sans, sans-serif">
+  <defs>
+    <radialGradient id="plate" cx="30%" cy="45%" r="80%">
+      <stop offset="0" stop-color="#151b23"/>
+      <stop offset="1" stop-color="#080b0f"/>
+    </radialGradient>
+    <linearGradient id="steel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e3e8ed"/>
+      <stop offset="0.45" stop-color="#aab3bc"/>
+      <stop offset="0.55" stop-color="#7f8994"/>
+      <stop offset="1" stop-color="#b9c1c9"/>
+    </linearGradient>
+    <linearGradient id="steelEdge" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f2f5f8"/>
+      <stop offset="0.5" stop-color="#8b959f"/>
+      <stop offset="1" stop-color="#3b434c"/>
+    </linearGradient>
+    <linearGradient id="steelFace" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6f7983"/>
+      <stop offset="0.5" stop-color="#4a525b"/>
+      <stop offset="1" stop-color="#2b3138"/>
+    </linearGradient>
+    <linearGradient id="inset" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0d1116"/>
+      <stop offset="1" stop-color="#161c24"/>
+    </linearGradient>
+    <radialGradient id="amber" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#fff1cc"/>
+      <stop offset="0.35" stop-color="#fda52b"/>
+      <stop offset="1" stop-color="#fda52b" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3"/>
+    </filter>
+    <filter id="softGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="10"/>
+    </filter>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" fill="none" stroke="#38c8e8" stroke-opacity="0.045" stroke-width="1"/>
+    </pattern>
+    <marker id="arrowhead" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0.5 L9.5 5 L0 9.5 z" fill="#38c8e8"/>
+    </marker>
+  </defs>
+
+  <!-- plate -->
+  <rect width="1280" height="640" fill="url(#plate)"/>
+  <rect width="1280" height="640" fill="url(#grid)"/>
+
+  <!-- blueprint construction, mark side -->
+  <g stroke="#38c8e8" fill="none" stroke-width="1">
+    <circle cx="300" cy="320" r="232" stroke-opacity="0.16"/>
+    <circle cx="300" cy="320" r="196" stroke-opacity="0.22" stroke-dasharray="3 9"/>
+    <circle cx="300" cy="320" r="118" stroke-opacity="0.12"/>
+    <path d="M300 60V102 M300 538V580 M40 320H82 M518 320H560" stroke-opacity="0.35"/>
+    <path d="M300 60V580 M40 320H560" stroke-opacity="0.06"/>
+  </g>
+
+  <!-- lattice to the wordmark -->
+  <g stroke="#38c8e8" stroke-width="1" fill="none">
+    <path d="M430 245 L556 232 L 1185 232" stroke-opacity="0.32"/>
+    <path d="M430 395 L556 408 L 1185 408" stroke-opacity="0.32"/>
+    <path d="M556 232 L556 408" stroke-opacity="0.18"/>
+  </g>
+  <g fill="#8fa37a">
+    <circle cx="556" cy="232" r="3.2"/>
+    <circle cx="556" cy="408" r="3.2"/>
+    <circle cx="1185" cy="232" r="3.2"/>
+    <circle cx="1185" cy="408" r="3.2"/>
+  </g>
+
+  <!-- hexagonal steel plate -->
+  <g transform="translate(300 320)">
+    <polygon points="0,-168 145.5,-84 145.5,84 0,168 -145.5,84 -145.5,-84" fill="url(#steelEdge)"/>
+    <polygon points="0,-150 130,-75 130,75 0,150 -130,75 -130,-75" fill="url(#steelFace)"/>
+    <polygon points="0,-128 110.9,-64 110.9,64 0,128 -110.9,64 -110.9,-64" fill="url(#inset)" stroke="#1d232b" stroke-width="2"/>
+    <!-- machined highlight on the upper-left bevel -->
+    <path d="M0,-150 L-130,-75 L-110.9,-64 L0,-128 Z" fill="#ffffff" fill-opacity="0.10"/>
+    <path d="M130,75 L0,150 L0,128 L110.9,64 Z" fill="#000000" fill-opacity="0.35"/>
+    <!-- cyan structural seams -->
+    <path d="M-130,-75 L-110.9,-64 M130,-75 L110.9,-64 M-130,75 L-110.9,64 M130,75 L110.9,64 M0,-150 L0,-128 M0,150 L0,128" stroke="#38c8e8" stroke-width="1.6" stroke-opacity="0.85"/>
+
+    <!-- parked ghost of the window -->
+    <g transform="translate(14 22)">
+      <rect x="-62" y="-44" width="124" height="88" rx="8" fill="#38c8e8" fill-opacity="0.05" stroke="#38c8e8" stroke-opacity="0.45" stroke-width="1.5" stroke-dasharray="5 5"/>
+      <path d="M-62 -24 H62" stroke="#38c8e8" stroke-opacity="0.35" stroke-width="1.5" stroke-dasharray="5 5"/>
+    </g>
+    <!-- restored window -->
+    <g transform="translate(-14 -22)">
+      <rect x="-62" y="-44" width="124" height="88" rx="8" fill="#1a2028" stroke="url(#steel)" stroke-width="3"/>
+      <path d="M-62 -24 H62" stroke="#aab3bc" stroke-width="2.5"/>
+      <circle cx="-48" cy="-34" r="3.5" fill="#6f7983"/>
+      <circle cx="-36" cy="-34" r="3.5" fill="#6f7983"/>
+      <rect x="-44" y="-10" width="70" height="5" rx="2.5" fill="#38c8e8" fill-opacity="0.55"/>
+      <rect x="-44" y="4" width="50" height="5" rx="2.5" fill="#6f7983" fill-opacity="0.6"/>
+      <rect x="-44" y="18" width="62" height="5" rx="2.5" fill="#6f7983" fill-opacity="0.45"/>
+    </g>
+    <!-- return path: from the parked ghost back up into place -->
+    <path d="M74 60 C 104 24, 78 -46, 30 -70" fill="none" stroke="#38c8e8" stroke-width="3.5" stroke-linecap="round" marker-end="url(#arrowhead)"/>
+    <path d="M74 60 C 104 24, 78 -46, 30 -70" fill="none" stroke="#38c8e8" stroke-width="3.5" stroke-opacity="0.5" filter="url(#glow)"/>
+    <!-- the one warm core: where the window was let go -->
+    <circle cx="74" cy="60" r="16" fill="url(#amber)" filter="url(#softGlow)"/>
+    <circle cx="74" cy="60" r="5.5" fill="#fda52b"/>
+    <circle cx="74" cy="60" r="2.2" fill="#fff4d6"/>
+  </g>
+
+  <!-- wordmark -->
+  <text x="556" y="332" font-size="108" font-weight="800" letter-spacing="6" fill="url(#steel)">REPRIEVE</text>
+  <text x="560" y="382" font-size="22" font-weight="500" fill="#c9d1d9">Super+W parks the window.  Super+Z puts it back, exactly as it was.</text>
+
+  <!-- product line -->
+  <text x="560" y="203" font-size="16" font-weight="600" letter-spacing="5" fill="#38c8e8">WINDOW-CLOSE RECOVERY FOR OMARCHY</text>
+
+  <!-- maker line -->
+  <g transform="translate(560 470)">
+    <polygon points="0,-9 7.8,-4.5 7.8,4.5 0,9 -7.8,4.5 -7.8,-4.5" fill="none" stroke="#aab3bc" stroke-width="1.4"/>
+    <circle cx="0" cy="0" r="2" fill="#fda52b"/>
+    <text x="20" y="5.5" font-size="15" font-weight="700" letter-spacing="4.5" fill="#aab3bc">GREYFORGE LABS</text>
+  </g>
+  <text x="1185" y="475" font-size="15" letter-spacing="2" fill="#5b646e" text-anchor="end">Hyprland · Quickshell · MIT</text>
+</svg>
