@@ -25,7 +25,8 @@ status_field() { ipc status | python3 -c "import json,sys; print(json.load(sys.s
 current_ws() { hyprctl -j activeworkspace | python3 -c 'import json,sys; print(json.load(sys.stdin)["name"])'; }
 disp() { hyprctl dispatch "$1" >/dev/null 2>&1; }
 
-declare -a MINE=()
+# spawn() runs in command substitutions, so track our windows in a file.
+MINE_FILE=$(mktemp)
 spawn() {
   local before after
   before=$(clients | python3 -c 'import json,sys; print(" ".join(c["address"] for c in json.load(sys.stdin)))')
@@ -35,7 +36,7 @@ spawn() {
     after=$(clients | python3 -c "import json,sys; b=set('$before'.split()); print(next((c['address'] for c in json.load(sys.stdin) if c['address'] not in b and c['class']=='foot'),''))")
     [[ -n "$after" ]] && break
   done
-  MINE+=("$after")
+  echo "$after" >> "$MINE_FILE"
   echo "$after"
 }
 
@@ -49,7 +50,8 @@ eq() { [[ "$1" == "$2" ]]; }
 cleanup() {
   ipc restoreAll >/dev/null
   sleep 0.5
-  for a in "${MINE[@]}"; do alive "$a" && disp "hl.dsp.window.close({ window = \"address:$a\" })"; done
+  while read -r a; do [[ -n "$a" ]] && alive "$a" && disp "hl.dsp.window.close({ window = \"address:$a\" })"; done < "$MINE_FILE"
+  rm -f "$MINE_FILE"
   pkill -f -- "client-name=reprieve-acceptance-" 2>/dev/null
   rm -f "$SILENCE"
 }
