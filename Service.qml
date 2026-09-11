@@ -2,12 +2,12 @@ import QtQuick
 import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Io
-import "UndoModel.js" as UndoModel
+import "ReprieveModel.js" as Model
 
-// Headless Hyprland undo stack. Parks Super+W closes onto a hidden special
-// workspace instead of killing the process. Never listens to key events and
-// never binds Ctrl+Z — those two are how compositor-wide undo plugins hang
-// a session.
+// Reprieve service: parks Super+W closes onto a hidden special workspace
+// instead of killing the process, and remembers enough to bring them back
+// after the shell restarts. Never listens to key events and never binds
+// Ctrl+Z.
 Item {
   id: root
   visible: false
@@ -15,112 +15,465 @@ Item {
   property var shell: null
   property var manifest: null
 
-  readonly property string pluginId: (manifest && manifest.id) ? String(manifest.id) : "io.github.greyforgelabs.desktop-undo"
-  readonly property string pluginDir: manifest && manifest.__sourceDir ? String(manifest.__sourceDir) : ""
-  readonly property string mediaBin: pluginDir + "/bin/media"
-  readonly property string parkWorkspace: UndoModel.PARK_WORKSPACE
-  readonly property int maxStack: UndoModel.clampMax(setting("maxStack", UndoModel.DEFAULT_MAX))
+  readonly property string pluginId: (manifest && manifest.id) ? String(manifest.id) : Model.PLUGIN_ID
+  // Omarchy strips __sourceDir from third-party manifests; fall back to the
+  // directory this file was loaded from.
+  readonly property string pluginDir: {
+    if (manifest && manifest.__sourceDir) return String(manifest.__sourceDir)
+    var url = String(Qt.resolvedUrl("."))
+    if (url.indexOf("file://") === 0) url = url.slice(7)
+    return url.replace(/\/+$/, "")
+  }
+  readonly property string mediaBin: pluginDir + "/bin/reprieve-media"
+  readonly property string journalBin: pluginDir + "/bin/reprieve-journal"
+  readonly property string bindsBin: pluginDir + "/bin/reprieve-binds"
+  readonly property string parkWorkspace: Model.PARK_WORKSPACE
+  readonly property int maxStack: Model.clampMax(setting("maxStack", Model.DEFAULT_MAX))
   readonly property bool trackAppClose: setting("trackAppClose", true) !== false
   readonly property bool pauseMediaOnPark: setting("pauseMediaOnPark", true) !== false
+  readonly property bool showToast: setting("showToast", true) !== false
+  readonly property bool setupDismissed: setting("setupDismissed", false) === true
   readonly property string home: Quickshell.env("HOME") || ""
   readonly property string stateHome: Quickshell.env("XDG_STATE_HOME") || (home + "/.local/state")
-  readonly property string statePath: stateHome + "/omarchy/desktop-undo.json"
+  readonly property string stateDir: stateHome + "/reprieve"
+  readonly property string session: Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE") || ""
 
-  property var model: UndoModel.createState({ max: maxStack })
+  property var model: Model.createState({ max: maxStack })
   property var snapshots: ({})
-  property bool mutating: false
-  property int mutatingToken: 0
+  property var expected: ({})
   property var undoStack: []
   property var redoStack: []
   property int undoCount: 0
   property int redoCount: 0
+  property int parkedCount: 0
   property string lastLabel: ""
   property string lastResult: ""
-  property var mediaQueue: []
-  property string mediaJobKind: ""
-  property string mediaJobAddress: ""
-  property bool showToast: true
+  property string recoveryNotice: ""
   property bool toastOpen: false
   property string toastText: ""
 
+  // Journal lifecycle
+  property string journalStatus: "loading"
+  property var journalEntries: []
+  property int journalSequence: 0
+  property bool journalConsumed: false
+  property bool journalDirty: false
+  property string pendingJournalText: ""
+  property double startedAt: Date.now()
+
+  // Bindings / setup
+  property var bindsStatus: null
+  property var lastInstallResult: null
+  property bool setupOffered: false
+
+  // Media
+  property var mediaQueue: []
+  property string mediaJobKind: ""
+  property string mediaJobAddress: ""
+
+  readonly property bool bindsInstalled: !!(bindsStatus && bindsStatus.installed)
+  readonly property bool legacyDetected: !!(bindsStatus && bindsStatus.legacy && bindsStatus.legacy.length)
+
   onMaxStackChanged: {
     if (!root.model) return
-    var next = UndoModel.cloneState(root.model)
+    var next = Model.cloneState(root.model)
     next.max = maxStack
     root.model = next
     root.publish()
   }
 
-  function setting(name, fallback) {
+  // ---------------------------------------------------------------- settings
+
+  function pluginEntry() {
     try {
       var cfg = root.shell && root.shell.shellConfig ? root.shell.shellConfig : null
       var plugins = cfg && cfg.plugins ? cfg.plugins : []
       for (var i = 0; i < plugins.length; i++) {
         var entry = plugins[i]
-        if (entry && entry.id === root.pluginId && entry[name] !== undefined && entry[name] !== null)
-          return entry[name]
+        if (entry && entry.id === root.pluginId) return entry
       }
     } catch (e) {}
+    return null
+  }
+
+  function setting(name, fallback) {
+    var entry = root.pluginEntry()
+    if (entry && entry[name] !== undefined && entry[name] !== null) return entry[name]
     return fallback
   }
+
+  function saveSetting(name, value) {
+    try {
+      if (!root.shell || typeof root.shell.updateEntryInline !== "function") return false
+      var entry = root.pluginEntry() || { id: root.pluginId }
+      var next = {}
+      for (var k in entry) next[k] = entry[k]
+      next[name] = value
+      return root.shell.updateEntryInline(root.pluginId, next) !== false
+    } catch (e) {
+      console.warn("reprieve: saveSetting failed", e)
+      return false
+    }
+  }
+
+  function setShowToast(value) {
+    var on = value !== false
+    root.saveSetting("showToast", on)
+    if (on) root.toast("Toasts on")
+    else { root.toastOpen = false; root.toastText = "" }
+  }
+
+  function toggleShowToast() { root.setShowToast(!root.showToast) }
+
+  function dismissSetup() { root.saveSetting("setupDismissed", true) }
+
+  // ---------------------------------------------------------------- publish
 
   function publish() {
     root.undoStack = (root.model && root.model.undo) ? root.model.undo.slice() : []
     root.redoStack = (root.model && root.model.redo) ? root.model.redo.slice() : []
-    var summary = UndoModel.statusSummary(root.model)
+    var summary = Model.statusSummary(root.model)
     root.undoCount = summary.undo
     root.redoCount = summary.redo
+    root.parkedCount = summary.parked
     root.lastLabel = summary.last
   }
 
-  function currentWorkspace() {
-    try {
-      var name = root.workspaceName(Hyprland.focusedWorkspace)
-      if (name && !UndoModel.isSpecialWorkspace(name)) return name
-    } catch (e) {}
-    return ""
+  function commit(state) {
+    root.model = state
+    root.publish()
+    root.persist()
   }
 
-  function loadState(raw) {
-    try {
-      var data = JSON.parse(raw || "{}")
-      if (data && data.showToast !== undefined)
-        root.showToast = data.showToast !== false
-    } catch (e) {}
-  }
-
-  function persistState() {
-    try {
-      var data = {}
-      try { data = JSON.parse(stateFile.text() || "{}") || {} } catch (e2) { data = {} }
-      data.showToast = root.showToast
-      stateFile.setText(JSON.stringify(data) + "\n")
-    } catch (e) {}
-  }
-
-  function setShowToast(value) {
-    root.showToast = value !== false
-    root.persistState()
-    if (root.showToast)
-      root.toast("Toasts on — top right")
-    else {
-      root.toastOpen = false
-      root.toastText = ""
-    }
-  }
-
-  function toggleShowToast() {
-    root.setShowToast(!root.showToast)
-  }
-
-  function toast(iconName, message) {
-    var text = String(message || iconName || "")
-    if (!text) return
-    if (!root.showToast) return
+  function toast(message) {
+    var text = String(message || "")
+    if (!text || !root.showToast) return
     root.toastText = text
     root.toastOpen = true
     toastTimer.restart()
   }
+
+  // ---------------------------------------------------------------- journal
+
+  function persist() {
+    if (!root.session) return
+    root.pendingJournalText = JSON.stringify(Model.toJournal(root.model, root.session))
+    root.journalDirty = true
+    persistDebounce.restart()
+  }
+
+  function flushJournal() {
+    if (!root.journalDirty || journalWriter.running) return
+    // Never race a quarantine rename with a fresh write.
+    if (quarantineProcess.running) { persistDebounce.restart(); return }
+    root.journalDirty = false
+    journalWriter.payload = root.pendingJournalText
+    journalWriter.command = ["python3", root.journalBin, "write", "--state-dir", root.stateDir]
+    journalWriter.running = true
+  }
+
+  function readJournal() {
+    if (journalReader.running) return
+    journalReader.command = ["python3", root.journalBin, "read", "--state-dir", root.stateDir]
+    journalReader.running = true
+  }
+
+  function onJournalRead(text) {
+    var envelope = null
+    try { envelope = JSON.parse(String(text || "").slice(0, Model.JOURNAL_MAX_BYTES + 4096)) } catch (e) {}
+    var status = envelope && envelope.status ? String(envelope.status) : "error"
+    if (status === "ok") {
+      var parsed = Model.parseJournal(envelope.text, root.session)
+      root.journalStatus = parsed.status
+      root.journalEntries = parsed.entries
+      root.journalSequence = parsed.sequence
+      if (parsed.status === "invalid") root.quarantineJournal(parsed.reason || "invalid")
+      else if (parsed.status === "stale") root.quarantineJournal("stale")
+    } else if (status === "empty") {
+      root.journalStatus = "empty"
+    } else {
+      // symlink / irregular / oversized / unreadable: never trust it.
+      root.journalStatus = status
+      root.quarantineJournal(status)
+    }
+    root.scheduleReconcile()
+  }
+
+  function quarantineJournal(reason) {
+    console.warn("reprieve: quarantining recovery journal:", reason)
+    quarantineProcess.command = ["python3", root.journalBin, "quarantine", "--state-dir", root.stateDir, "--reason", String(reason || "damaged").replace(/[^A-Za-z0-9_-]/g, "")]
+    quarantineProcess.running = true
+  }
+
+  // ------------------------------------------------------------ reconcile
+
+  function toplevelsReady() {
+    try {
+      var list = Hyprland.toplevels ? (Hyprland.toplevels.values || []) : []
+      if (list.length === 0) return (Date.now() - root.startedAt) > 4000
+      for (var i = 0; i < list.length; i++) {
+        var ipc = list[i] && list[i].lastIpcObject
+        if (ipc && ipc.class !== undefined) return true
+      }
+    } catch (e) {}
+    return (Date.now() - root.startedAt) > 4000
+  }
+
+  function scheduleReconcile() {
+    reconcileTimer.restart()
+  }
+
+  function liveWindows() {
+    var out = []
+    try {
+      var list = Hyprland.toplevels ? (Hyprland.toplevels.values || []) : []
+      for (var i = 0; i < list.length; i++) {
+        var snap = root.snapshotFromHandle(list[i])
+        if (snap && snap.address) out.push(snap)
+      }
+    } catch (e) {}
+    return out
+  }
+
+  function reconcile() {
+    if (!root.toplevelsReady()) {
+      reconcileTimer.interval = 700
+      reconcileTimer.restart()
+      return
+    }
+    var entries = root.journalConsumed ? [] : root.journalEntries
+    var result = Model.reconcile(root.model, entries, root.liveWindows(), root.journalSequence)
+    root.journalConsumed = true
+    root.journalEntries = []
+    var report = result.report
+    root.commit(result.state)
+    if (report.recovered.length) {
+      var n = report.recovered.length
+      root.recoveryNotice = "Recovered " + n + " parked window" + (n === 1 ? "" : "s") + " after shell reload."
+      root.toast(root.recoveryNotice + " Super+Shift+Z to review")
+      noticeTimer.restart()
+    } else if (report.kept.length) {
+      root.recoveryNotice = "Restored " + report.kept.length + " parked window" + (report.kept.length === 1 ? "" : "s") + " to the timeline."
+      noticeTimer.restart()
+    }
+    if (report.converted.length || report.dropped.length)
+      console.log("reprieve: reconcile converted", report.converted.length, "dropped", report.dropped.length)
+    root.lastResult = "reconciled"
+    return report
+  }
+
+  // ------------------------------------------------------------- expected
+
+  function expect(address, kind) {
+    var addr = Model.normalizeAddress(address)
+    if (!addr) return
+    var next = {}
+    for (var k in root.expected) next[k] = root.expected[k]
+    var slot = next[addr] ? Object.assign({}, next[addr]) : { close: 0, move: 0 }
+    slot[kind] = (slot[kind] || 0) + 1
+    slot.at = Date.now()
+    next[addr] = slot
+    root.expected = next
+    expectSweep.restart()
+  }
+
+  function consume(address, kind) {
+    var addr = Model.normalizeAddress(address)
+    var slot = addr ? root.expected[addr] : null
+    if (!slot || !(slot[kind] > 0)) return false
+    var next = {}
+    for (var k in root.expected) next[k] = root.expected[k]
+    var copy = Object.assign({}, slot)
+    copy[kind] -= 1
+    if (copy.close <= 0 && copy.move <= 0) delete next[addr]
+    else next[addr] = copy
+    root.expected = next
+    return true
+  }
+
+  function sweepExpected() {
+    var now = Date.now()
+    var next = {}
+    var changed = false
+    for (var addr in root.expected) {
+      var slot = root.expected[addr]
+      if (slot && now - slot.at < 5000) { next[addr] = slot; continue }
+      changed = true
+      // An expected close that never came: the app refused to die (unsaved
+      // changes prompt, say). If it is still parked, keep it recoverable.
+      if (slot && slot.close > 0) root.adoptIfStranded(addr)
+    }
+    if (changed) root.expected = next
+    if (Object.keys(next).length) expectSweep.restart()
+  }
+
+  function adoptIfStranded(address) {
+    var handle = root.liveHandle(address)
+    if (!handle) return
+    var snap = root.snapshotFromHandle(handle)
+    if (!snap || snap.workspace !== root.parkWorkspace) return
+    if (Model.findParked(root.model, snap.address) !== -1) return
+    snap.recovered = true
+    snap.workspace = ""
+    var result = Model.pushRecovered(root.model, snap)
+    if (result.action) {
+      root.commit(result.state)
+      root.toast("Kept " + Model.toastLabel(result.action) + " recoverable")
+    }
+  }
+
+  // ------------------------------------------------------------- hyprland
+
+  function currentWorkspace() {
+    try {
+      var name = root.workspaceName(Hyprland.focusedWorkspace)
+      if (name && !Model.isSpecialWorkspace(name)) return Model.normalizeWorkspace(name)
+    } catch (e) {}
+    return ""
+  }
+
+  function hyprDispatch(lua, legacy) {
+    try {
+      Hyprland.dispatch(Hyprland.usingLua ? lua : legacy)
+    } catch (e) {
+      console.warn("reprieve: dispatch failed", e)
+    }
+  }
+
+  function windowSel(addr) {
+    return 'window = "address:' + addr + '"'
+  }
+
+  // Omarchy's windowsIn/Out use popin — set no_anim before the move so park
+  // and restore are a cut, not a cartoon.
+  function setNoAnim(address, on) {
+    var addr = Model.normalizeAddress(address)
+    if (!addr) return
+    var value = on ? "1" : "0"
+    root.hyprDispatch(
+      'hl.dsp.window.set_prop({ ' + root.windowSel(addr) + ', prop = "no_anim", value = "' + value + '" })',
+      "setprop address:" + addr + " noanim " + value)
+  }
+
+  function moveSilent(address, workspace) {
+    var addr = Model.normalizeAddress(address)
+    var ws = Model.normalizeWorkspace(workspace)
+    if (!addr || !ws) return false
+    root.expect(addr, "move")
+    root.setNoAnim(addr, true)
+    root.hyprDispatch(
+      'hl.dsp.window.move({ ' + root.windowSel(addr) + ', workspace = "' + ws + '", follow = false })',
+      "movetoworkspacesilent " + ws + ",address:" + addr)
+    return true
+  }
+
+  function setFloating(address, floating) {
+    var addr = Model.normalizeAddress(address)
+    if (!addr) return
+    root.hyprDispatch(
+      'hl.dsp.window.float({ ' + root.windowSel(addr) + ', action = "' + (floating ? "set" : "unset") + '" })',
+      (floating ? "setfloating" : "settiled") + " address:" + addr)
+  }
+
+  function setFullscreen(address, internal, client) {
+    var addr = Model.normalizeAddress(address)
+    if (!addr) return
+    var i = Math.max(0, Math.min(2, Math.floor(Number(internal) || 0)))
+    var c = Math.max(0, Math.min(2, Math.floor(Number(client) || 0)))
+    root.hyprDispatch(
+      'hl.dsp.window.fullscreen_state({ ' + root.windowSel(addr) + ', internal = ' + i + ', client = ' + c + ', action = "set" })',
+      "fullscreenstate " + i + " " + c)
+  }
+
+  function focusWindow(address) {
+    var addr = Model.normalizeAddress(address)
+    if (!addr) return
+    root.hyprDispatch('hl.dsp.focus({ ' + root.windowSel(addr) + ' })', "focuswindow address:" + addr)
+  }
+
+  function closeWindow(address) {
+    var addr = Model.normalizeAddress(address)
+    if (!addr) return
+    root.expect(addr, "close")
+    root.setNoAnim(addr, true)
+    root.hyprDispatch('hl.dsp.window.close({ ' + root.windowSel(addr) + ' })', "closewindow address:" + addr)
+  }
+
+  function liveHandle(address) {
+    var addr = Model.normalizeAddress(address)
+    if (!addr || !Hyprland.toplevels) return null
+    try {
+      var list = Hyprland.toplevels.values || []
+      for (var i = 0; i < list.length; i++) {
+        var handle = list[i]
+        if (handle && Model.normalizeAddress(handle.address) === addr) return handle
+      }
+    } catch (e) {}
+    return null
+  }
+
+  function workspaceName(workspace) {
+    if (!workspace) return ""
+    var name = String(workspace.name || "")
+    return name !== "" ? name : String(workspace.id || "")
+  }
+
+  function snapshotFromHandle(handle) {
+    if (!handle) return null
+    var address = Model.normalizeAddress(handle.address)
+    if (!address) return null
+    var cached = root.snapshots[address] || {}
+    var ipc = handle.lastIpcObject || {}
+    var ipcWs = ipc.workspace && ipc.workspace.name !== undefined ? String(ipc.workspace.name) : ""
+    return {
+      address: address,
+      class: String(ipc.class || cached.class || ""),
+      title: String(handle.title || ipc.title || cached.title || ""),
+      workspace: root.workspaceName(handle.workspace) || ipcWs || cached.workspace || "",
+      floating: cached.floatingKnown ? !!cached.floating : (ipc.floating !== undefined ? !!ipc.floating : !!cached.floating),
+      fullscreen: Number(ipc.fullscreen !== undefined ? ipc.fullscreen : (cached.fullscreen || 0)),
+      fullscreenClient: Number(ipc.fullscreenClient !== undefined ? ipc.fullscreenClient : (cached.fullscreenClient || 0)),
+      pid: Number(ipc.pid || cached.pid || 0),
+      openedAt: cached.openedAt || 0
+    }
+  }
+
+  function activeSnapshot() {
+    var handle = null
+    try { handle = Hyprland.activeToplevel } catch (e) {}
+    return handle ? root.snapshotFromHandle(handle) : null
+  }
+
+  function cacheToplevels() {
+    var next = {}
+    try {
+      var list = Hyprland.toplevels ? (Hyprland.toplevels.values || []) : []
+      for (var i = 0; i < list.length; i++) {
+        var snap = root.snapshotFromHandle(list[i])
+        if (!snap || !snap.address) continue
+        var previous = root.snapshots[snap.address]
+        if (previous && previous.openedAt) snap.openedAt = previous.openedAt
+        // changefloatingmode events keep the cache current between IPC
+        // refreshes; snapshotFromHandle already preferred that value.
+        if (previous && previous.floatingKnown) snap.floatingKnown = true
+        next[snap.address] = snap
+      }
+    } catch (e) {}
+    root.snapshots = next
+  }
+
+  function patchSnapshot(address, patch) {
+    var addr = Model.normalizeAddress(address)
+    if (!addr) return
+    var next = {}
+    for (var key in root.snapshots) next[key] = root.snapshots[key]
+    var existing = next[addr] ? Object.assign({}, next[addr]) : { address: addr }
+    for (var p in patch) existing[p] = patch[p]
+    next[addr] = existing
+    root.snapshots = next
+  }
+
+  // ---------------------------------------------------------------- media
 
   function enqueueMedia(kind, args, address) {
     root.mediaQueue = root.mediaQueue.concat([{ kind: kind, args: args, address: address || "" }])
@@ -137,36 +490,6 @@ Item {
     mediaProcess.running = true
   }
 
-  function capText(raw, maxLen) {
-    var text = String(raw == null ? "" : raw)
-    if (text.length > maxLen) return text.slice(0, maxLen)
-    return text
-  }
-
-  function parseMediaPayload(raw) {
-    try {
-      var payload = JSON.parse(root.capText(raw, 4096) || "{}")
-      if (!payload || typeof payload !== "object") return null
-      var muted = []
-      var srcMuted = payload.muted || []
-      for (var i = 0; i < srcMuted.length && muted.length < 32; i++) {
-        var item = srcMuted[i]
-        if (!item) continue
-        muted.push({ index: Number(item.index || 0), pid: Number(item.pid || 0) })
-      }
-      var paused = []
-      var srcPaused = payload.paused || []
-      for (var j = 0; j < srcPaused.length && paused.length < 16; j++) {
-        var name = root.capText(srcPaused[j], 200)
-        if (name) paused.push(name)
-      }
-      if (!muted.length && !paused.length) return null
-      return { muted: muted, paused: paused }
-    } catch (e) {
-      return null
-    }
-  }
-
   function stopMedia() {
     mediaTimeout.stop()
     try { if (mediaProcess.running) mediaProcess.running = false } catch (e) {}
@@ -178,7 +501,7 @@ Item {
   function requestPause(snapshot) {
     if (!root.pauseMediaOnPark || !snapshot) return
     var pid = Number(snapshot.pid || 0)
-    var klass = String(snapshot.class || "")
+    var klass = Model.sanitizeClass(snapshot.class)
     if (!pid && !klass) return
     root.enqueueMedia("pause", [
       "python3", root.mediaBin, "pause",
@@ -188,133 +511,26 @@ Item {
   }
 
   function requestResume(media) {
-    if (!media) return
-    var muted = media.muted || []
-    var paused = media.paused || []
-    if (!muted.length && !paused.length) return
+    var clean = Model.sanitizeMedia(media)
+    if (!clean) return
     root.enqueueMedia("resume", [
       "python3", root.mediaBin, "resume",
-      "--payload", JSON.stringify(media)
+      "--payload", JSON.stringify(clean)
     ], "")
   }
 
-  function beginMutate() {
-    root.mutating = true
-    root.mutatingToken += 1
-    var token = root.mutatingToken
-    mutateTimer.token = token
-    mutateTimer.restart()
-  }
-
-  function luaString(value) {
-    return UndoModel.luaString(value)
-  }
-
-  function hyprDispatch(lua, legacy) {
-    try {
-      Hyprland.dispatch(Hyprland.usingLua ? lua : legacy)
-    } catch (e) {
-      console.warn("desktop-undo dispatch failed", e)
-    }
-  }
-
-  // Omarchy's windowsIn/Out use popin 87% — that's the explode. Set no_anim
-  // on the window *before* the move so park/restore is a cut, not a cartoon.
-  function setNoAnim(address, on) {
-    var addr = UndoModel.normalizeAddress(address)
-    if (!addr) return
-    var value = on ? "1" : "0"
-    root.hyprDispatch(
-      'hl.dsp.window.set_prop({ window = "address:' + root.luaString(addr)
-        + '", prop = "no_anim", value = "' + value + '" })',
-      "setprop address:" + addr + " noanim " + value)
-  }
-
-  function moveSilent(address, workspace) {
-    var addr = UndoModel.normalizeAddress(address)
-    if (!addr || !workspace) return
-    root.setNoAnim(addr, true)
-    root.hyprDispatch(
-      'hl.dsp.window.move({ window = "address:' + root.luaString(addr)
-        + '", workspace = "' + root.luaString(workspace) + '", follow = false })',
-      "movetoworkspacesilent " + workspace + ",address:" + addr)
-  }
-
-  function liveHandle(address) {
-    var addr = UndoModel.normalizeAddress(address)
-    if (!addr || !Hyprland.toplevels) return null
-    try {
-      var list = Hyprland.toplevels.values || []
-      for (var i = 0; i < list.length; i++) {
-        var handle = list[i]
-        if (handle && UndoModel.normalizeAddress(handle.address) === addr)
-          return handle
-      }
-    } catch (e) {}
-    return null
-  }
-
-  function workspaceName(workspace) {
-    if (!workspace) return ""
-    var name = String(workspace.name || "")
-    return name !== "" ? name : String(workspace.id || "")
-  }
-
-  function snapshotFromHandle(handle) {
-    if (!handle) return null
-    var address = UndoModel.normalizeAddress(handle.address)
-    var cached = address && root.snapshots[address] ? root.snapshots[address] : {}
-    var ipc = handle.lastIpcObject || {}
-    return {
-      address: address,
-      class: String(handle.class || ipc.class || cached.class || ""),
-      title: String(handle.title || ipc.title || cached.title || ""),
-      workspace: root.workspaceName(handle.workspace) || cached.workspace || "",
-      floating: handle.floating !== undefined ? !!handle.floating : !!ipc.floating || !!cached.floating,
-      fullscreen: Number(handle.fullscreen !== undefined ? handle.fullscreen : (ipc.fullscreen || cached.fullscreen || 0)),
-      pid: Number(ipc.pid || cached.pid || 0)
-    }
-  }
-
-  function activeSnapshot() {
-    var handle = null
-    try { handle = Hyprland.activeToplevel } catch (e) {}
-    if (handle) return root.snapshotFromHandle(handle)
-    return null
-  }
-
-  function cacheToplevels() {
-    var next = {}
-    try {
-      var list = Hyprland.toplevels ? (Hyprland.toplevels.values || []) : []
-      for (var i = 0; i < list.length; i++) {
-        var snap = root.snapshotFromHandle(list[i])
-        if (!snap || !snap.address) continue
-        var previous = root.snapshots[snap.address]
-        if (previous && previous.openedAt) snap.openedAt = previous.openedAt
-        next[snap.address] = snap
-      }
-    } catch (e) {}
-    root.snapshots = next
-  }
+  // -------------------------------------------------------------- effects
 
   function applyKills(addresses) {
-    if (!addresses || !addresses.length) return
-    root.beginMutate()
-    for (var i = 0; i < addresses.length; i++) {
-      var address = addresses[i]
-      if (!root.liveHandle(address)) continue
-      root.setNoAnim(address, true)
-      root.hyprDispatch(
-        'hl.dsp.window.close({ window = "address:' + root.luaString(address) + '" })',
-        "closewindow address:" + address)
+    for (var i = 0; i < (addresses || []).length; i++) {
+      if (!root.liveHandle(addresses[i])) continue
+      root.closeWindow(addresses[i])
     }
   }
 
-  function applyEffects(effects) {
-    if (!effects || !effects.length) return
-    root.beginMutate()
-    for (var i = 0; i < effects.length; i++) {
+  function applyEffects(effects, opts) {
+    opts = opts || {}
+    for (var i = 0; i < (effects || []).length; i++) {
       var effect = effects[i]
       if (!effect) continue
       if (effect.type === "park") {
@@ -322,54 +538,71 @@ Item {
         root.moveSilent(effect.address, effect.workspace)
         root.requestPause({ address: effect.address, pid: effect.pid, class: effect.class })
       } else if (effect.type === "restore") {
-        root.restoreWindow(effect)
+        root.restoreWindow(effect, opts.focus !== false)
       } else if (effect.type === "relaunch") {
         root.relaunch(effect)
       } else if (effect.type === "close") {
         if (!root.liveHandle(effect.address)) continue
-        root.setNoAnim(effect.address, true)
-        root.hyprDispatch(
-          'hl.dsp.window.close({ window = "address:' + root.luaString(effect.address) + '" })',
-          "closewindow address:" + effect.address)
+        root.closeWindow(effect.address)
       }
     }
   }
 
-  function restoreWindow(effect) {
-    if (root.liveHandle(effect.address)) {
-      var workspace = effect.workspace || "1"
-      root.moveSilent(effect.address, workspace)
-      if (root.currentWorkspace() !== workspace) {
-        root.hyprDispatch(
-          'hl.dsp.focus({ workspace = "' + root.luaString(workspace) + '" })',
-          "workspace " + workspace)
-      }
-      if (effect.floating) {
-        root.hyprDispatch(
-          'hl.dsp.window.float({ window = "address:' + root.luaString(effect.address) + '", action = "set" })',
-          "setfloating address:" + effect.address)
-      }
-      animClearTimer.address = effect.address
-      animClearTimer.restart()
-      root.requestResume(effect.media)
-      return
+  function restoreWindow(effect, focus) {
+    if (!root.liveHandle(effect.address)) {
+      root.relaunch(effect)
+      return false
     }
-    root.relaunch(effect)
+    var workspace = Model.normalizeWorkspace(effect.workspace)
+    if (!workspace || Model.isSpecialWorkspace(workspace)) workspace = root.currentWorkspace()
+    if (!workspace) workspace = "1"
+    root.moveSilent(effect.address, workspace)
+    root.setFloating(effect.address, !!effect.floating)
+    if (effect.fullscreen > 0 || effect.fullscreenClient > 0)
+      root.setFullscreen(effect.address, effect.fullscreen, effect.fullscreenClient)
+    if (focus) root.focusWindow(effect.address)
+    animClear.queue(effect.address)
+    root.requestResume(effect.media)
+    return true
   }
 
   function relaunch(effect) {
-    var command = UndoModel.relaunchCommand(effect)
+    var command = Model.relaunchCommand(effect)
     if (!command || !command.length) {
       root.lastResult = "gone"
+      root.toast("Cannot restore " + Model.toastLabel(effect) + " — window is gone")
       return
     }
     try {
       Quickshell.execDetached(command)
       root.lastResult = "relaunched"
     } catch (e) {
-      console.warn("desktop-undo relaunch failed", e)
+      console.warn("reprieve: relaunch failed", e)
       root.lastResult = "error"
     }
+  }
+
+  // -------------------------------------------------------------- actions
+
+  function parkActive() {
+    var snapshot = root.activeSnapshot()
+    if (!snapshot || !snapshot.address) {
+      root.lastResult = "empty"
+      return "empty"
+    }
+    var result = Model.pushPark(root.model, snapshot)
+    if (result.reason !== "parked") {
+      root.lastResult = "passthrough"
+      return "passthrough"
+    }
+    root.commit(result.state)
+    if (snapshot.fullscreen > 0) root.setFullscreen(snapshot.address, 0, 0)
+    root.moveSilent(snapshot.address, root.parkWorkspace)
+    root.applyKills(result.kills)
+    root.requestPause(snapshot)
+    root.lastResult = "parked"
+    root.toast("Parked " + Model.toastLabel(result.action) + " — Super+Z to undo")
+    return "parked"
   }
 
   function closeActive() {
@@ -378,186 +611,325 @@ Item {
       root.lastResult = "empty"
       return "empty"
     }
-    var cached = root.snapshots[snapshot.address]
-    if (cached && !snapshot.class) snapshot.class = cached.class
-    var result = UndoModel.pushPark(root.model, snapshot)
-    if (result.reason !== "parked") {
-      root.lastResult = result.reason
-      return "passthrough"
-    }
-    root.model = result.state
-    root.publish()
-    root.beginMutate()
-    root.moveSilent(snapshot.address, root.parkWorkspace)
-    root.applyKills(result.kills)
-    root.requestPause(snapshot)
-    root.lastResult = "parked"
-    root.toast("media-pause", "Parked " + UndoModel.toastLabel(result.action) + " — Super+Z to undo")
-    return "parked"
+    root.closeWindow(snapshot.address)
+    root.lastResult = "closed"
+    return "closed"
   }
 
-  function killActive() {
-    var snapshot = root.activeSnapshot()
-    if (!snapshot || !snapshot.address) {
+  // Permanent close of a parked window, from the timeline.
+  function closeParked(address) {
+    var index = Model.findParked(root.model, address)
+    if (index === -1) {
       root.lastResult = "empty"
       return "empty"
     }
-    root.beginMutate()
-    root.hyprDispatch("hl.dsp.window.close()", "killactive")
-    root.lastResult = "killed"
-    return "killed"
+    var action = root.model.undo[index]
+    root.commit(Model.dropAddress(root.model, action.address))
+    root.closeWindow(action.address)
+    root.lastResult = "closed"
+    root.toast("Closed " + Model.toastLabel(action))
+    return "closed"
   }
 
   function undoLast() {
-    var result = UndoModel.undo(root.model)
-    if (!result.action) {
-      root.lastResult = "empty"
-      return "empty"
-    }
-    root.model = result.state
-    root.publish()
-    root.applyEffects(result.effects)
-    root.lastResult = "undone"
-    var here = result.effects.length && result.effects[0].here
-    root.toast("media-play", (here ? "Restored here: " : "Restored ") + UndoModel.toastLabel(result.action))
-    return "undone"
+    var result = Model.undoAt(root.model, (root.model.undo || []).length - 1, { workspace: "" })
+    return root.finishRestore(result, false)
   }
 
   function restoreAt(index, here) {
-    var opts = {}
-    if (here === true) {
-      var workspace = root.currentWorkspace()
-      if (workspace) opts.workspace = workspace
-    }
-    var result = UndoModel.undoAt(root.model, Number(index), opts)
+    var opts = { workspace: here === true ? root.currentWorkspace() : "" }
+    var result = Model.undoAt(root.model, Number(index), opts)
+    return root.finishRestore(result, here === true)
+  }
+
+  function finishRestore(result, here) {
     if (!result.action) {
       root.lastResult = "empty"
       return "empty"
     }
-    root.model = result.state
-    root.publish()
-    root.applyEffects(result.effects)
-    root.lastResult = here ? "here" : "undone"
-    root.toast("media-play", (here ? "Restored here: " : "Restored ") + UndoModel.toastLabel(result.action))
+    var effects = result.effects
+    // A recovered window has no recorded workspace: land it where the user is.
+    if (effects.length && effects[0].type === "restore" && !effects[0].workspace)
+      effects[0] = Object.assign({}, effects[0], { workspace: root.currentWorkspace(), here: true })
+    root.commit(result.state)
+    root.applyEffects(effects, { focus: true })
+    var wasHere = !!(effects.length && effects[0].here)
+    root.lastResult = wasHere ? "here" : "undone"
+    root.toast((wasHere ? "Restored here: " : "Restored ") + Model.toastLabel(result.action))
     return root.lastResult
   }
 
   function redoLast() {
-    var result = UndoModel.redo(root.model)
+    var result = Model.redo(root.model)
     if (!result.action) {
       root.lastResult = "empty"
       return "empty"
     }
-    root.model = result.state
-    root.publish()
+    root.commit(result.state)
     root.applyEffects(result.effects)
     root.lastResult = "redone"
-    root.toast("media-pause", "Parked " + UndoModel.toastLabel(result.action) + " — Super+Z to undo")
+    root.toast("Parked " + Model.toastLabel(result.action) + " — Super+Z to undo")
     return "redone"
   }
 
-  function recordExternalClose(address) {
-    if (!root.trackAppClose || root.mutating) return
-    var addr = UndoModel.normalizeAddress(address)
+  function restoreAll() {
+    var result = Model.restoreAll(root.model, root.currentWorkspace())
+    if (!result.actions.length) {
+      root.lastResult = "empty"
+      return "empty"
+    }
+    root.commit(result.state)
+    root.applyEffects(result.effects, { focus: false })
+    root.lastResult = "restored " + result.actions.length
+    root.toast("Restored " + result.actions.length + " parked window" + (result.actions.length === 1 ? "" : "s"))
+    return root.lastResult
+  }
+
+  function clearHistory() {
+    var result = Model.clear(root.model)
+    if (!result.ok) {
+      root.lastResult = "refused"
+      return "Reprieve: " + result.live + " live parked window" + (result.live === 1 ? "" : "s") + " remain.\nRestore or permanently close them before clearing recovery state."
+    }
+    root.commit(result.state)
+    root.lastResult = "cleared"
+    return "cleared"
+  }
+
+  function resetAll() {
+    var result = Model.reset(root.model, root.currentWorkspace())
+    root.commit(result.state)
+    root.applyEffects(result.effects, { focus: false })
+    root.recoveryNotice = ""
+    root.lastResult = "reset " + result.actions.length
+    if (result.actions.length) root.toast("Restored " + result.actions.length + " and reset")
+    return root.lastResult
+  }
+
+  // --------------------------------------------------------------- events
+
+  function handleClose(address) {
+    var addr = Model.normalizeAddress(address)
     if (!addr) return
-    var parked = UndoModel.parkedAddresses(root.model)
-    if (parked.indexOf(addr) !== -1) {
-      root.model = UndoModel.dropAddress(root.model, addr)
-      root.publish()
+    if (root.consume(addr, "close")) {
+      if (Model.findParked(root.model, addr) !== -1) root.commit(Model.dropAddress(root.model, addr))
       return
     }
+    if (Model.findParked(root.model, addr) !== -1) {
+      var dead = Model.markDead(root.model, addr)
+      root.commit(dead.state)
+      if (dead.converted) root.toast(Model.toastLabel(dead.action) + " closed while parked — Reopen available")
+      else if (dead.action) root.toast(Model.toastLabel(dead.action) + " closed while parked — cannot restore")
+      return
+    }
+    if (!root.trackAppClose) return
     var snapshot = root.snapshots[addr]
     if (!snapshot) return
     if (snapshot.openedAt && (Date.now() - snapshot.openedAt) < 800) return
-    var result = UndoModel.pushRelaunch(root.model, snapshot)
+    var result = Model.pushRelaunch(root.model, snapshot)
     if (result.action) {
-      root.model = result.state
-      root.publish()
+      root.commit(result.state)
       root.applyKills(result.kills)
     }
   }
 
+  function handleMove(address, workspace) {
+    var addr = Model.normalizeAddress(address)
+    if (!addr) return
+    var ws = String(workspace || "")
+    if (root.consume(addr, "move")) return
+    var parked = Model.findParked(root.model, addr) !== -1
+    if (parked && ws !== root.parkWorkspace) {
+      // Someone else brought it back; it is visible, so stop tracking it.
+      root.commit(Model.dropAddress(root.model, addr))
+      return
+    }
+    if (!parked && ws === root.parkWorkspace) {
+      var snap = root.snapshots[addr] ? Object.assign({}, root.snapshots[addr]) : null
+      if (!snap) {
+        var handle = root.liveHandle(addr)
+        snap = handle ? root.snapshotFromHandle(handle) : null
+      }
+      if (!snap) return
+      if (Model.isSpecialWorkspace(snap.workspace)) snap.workspace = ""
+      snap.recovered = true
+      var result = Model.pushRecovered(root.model, snap)
+      if (result.action) root.commit(result.state)
+    }
+  }
+
+  // ------------------------------------------------------------- bindings
+
+  function refreshBindStatus() {
+    if (bindsProcess.running) { bindsProcess.rerun = true; return }
+    bindsProcess.mode = "status"
+    bindsProcess.command = ["python3", root.bindsBin, "status", "--json"]
+    bindsProcess.running = true
+  }
+
+  function installBinds(optionsJson) {
+    var opts = {}
+    try { opts = JSON.parse(optionsJson || "{}") || {} } catch (e) { opts = {} }
+    var args = ["python3", root.bindsBin, "install", "--json"]
+    var keyRe = /^[A-Za-z0-9_ +]{1,48}$/
+    var actions = ["undo", "redo", "timeline", "close"]
+    for (var i = 0; i < actions.length; i++) {
+      var a = actions[i]
+      if (opts[a] && keyRe.test(String(opts[a]))) args.push("--" + a, String(opts[a]))
+    }
+    function list(name) {
+      var items = Array.isArray(opts[name]) ? opts[name] : []
+      var clean = []
+      for (var j = 0; j < items.length; j++)
+        if (actions.indexOf(String(items[j])) !== -1) clean.push(String(items[j]))
+      return clean
+    }
+    var skip = list("skip")
+    var replace = list("replace")
+    if (opts.replace && opts.replace.indexOf && opts.replace.indexOf("park") !== -1) replace.push("park")
+    if (skip.length) args.push("--skip", skip.join(","))
+    if (replace.length) args.push("--replace", replace.join(","))
+    if (bindsProcess.running) return "busy"
+    bindsProcess.mode = "install"
+    bindsProcess.command = args
+    bindsProcess.running = true
+    return "installing"
+  }
+
+  function removeBinds() {
+    if (bindsProcess.running) return "busy"
+    bindsProcess.mode = "remove"
+    bindsProcess.command = ["python3", root.bindsBin, "remove", "--json"]
+    bindsProcess.running = true
+    return "removing"
+  }
+
+  function maybeOfferSetup() {
+    if (root.setupOffered || !root.bindsStatus) return
+    if (root.bindsInstalled || root.setupDismissed) return
+    root.setupOffered = true
+    try {
+      if (root.shell && typeof root.shell.summon === "function")
+        root.shell.summon(root.pluginId, JSON.stringify({ view: "setup" }))
+    } catch (e) {}
+  }
+
+  function openTimeline() {
+    try {
+      if (root.shell && typeof root.shell.toggle === "function")
+        root.shell.toggle(root.pluginId, JSON.stringify({ view: "timeline" }))
+    } catch (e) {}
+  }
+
   function statusJson() {
-    var summary = UndoModel.statusSummary(root.model)
+    var summary = Model.statusSummary(root.model)
     summary.result = root.lastResult
+    summary.addresses = Model.parkedAddresses(root.model)
+    summary.journal = root.journalStatus
+    summary.session = root.session ? root.session.slice(0, 12) : ""
+    summary.binds = root.bindsStatus ? !!root.bindsStatus.installed : null
     return JSON.stringify(summary)
   }
 
+  // --------------------------------------------------------------- timers
+
+  Timer { id: toastTimer; interval: 1800; repeat: false; onTriggered: { root.toastOpen = false; root.toastText = "" } }
+  Timer { id: noticeTimer; interval: 60000; repeat: false; onTriggered: root.recoveryNotice = "" }
+  Timer { id: persistDebounce; interval: 40; repeat: false; onTriggered: root.flushJournal() }
+  Timer { id: reconcileTimer; interval: 500; repeat: false; onTriggered: root.reconcile() }
+  Timer { id: expectSweep; interval: 5200; repeat: false; onTriggered: root.sweepExpected() }
+  Timer { id: cacheDebounce; interval: 150; repeat: false; onTriggered: root.cacheToplevels() }
+  Timer { id: refreshDebounce; interval: 60; repeat: false; onTriggered: { try { Hyprland.refreshToplevels() } catch (e) {}; cacheDebounce.restart() } }
+
   Timer {
-    id: toastTimer
-    interval: 1800
+    id: animClear
+    property var pending: []
+    interval: 120
     repeat: false
+    function queue(address) { pending = pending.concat([address]); restart() }
     onTriggered: {
-      root.toastOpen = false
-      root.toastText = ""
+      var list = pending
+      pending = []
+      for (var i = 0; i < list.length; i++) root.setNoAnim(list[i], false)
     }
   }
 
-  FileView {
-    id: stateFile
-    path: root.statePath
-    watchChanges: false
-    atomicWrites: true
-    printErrors: false
-    onLoaded: root.loadState(text())
+  // ------------------------------------------------------------ processes
+
+  Process {
+    id: journalReader
+    running: false
+    stdout: StdioCollector { id: journalReaderOut; waitForEnd: true }
+    onExited: function() { root.onJournalRead(journalReaderOut.text) }
   }
 
-  Timer {
-    id: mutateTimer
-    property int token: 0
-    interval: 350
-    repeat: false
-    onTriggered: if (root.mutatingToken === token) root.mutating = false
-  }
-
-  Timer {
-    id: animClearTimer
-    property string address: ""
-    interval: 80
-    repeat: false
-    onTriggered: {
-      if (address) root.setNoAnim(address, false)
-      address = ""
+  Process {
+    id: journalWriter
+    property string payload: ""
+    running: false
+    stdinEnabled: true
+    stdout: StdioCollector { id: journalWriterOut; waitForEnd: true }
+    onStarted: {
+      journalWriter.write(payload)
+      journalWriter.stdinEnabled = false
+    }
+    onExited: function(code) {
+      journalWriter.stdinEnabled = true
+      if (code !== 0) console.warn("reprieve: journal write failed:", String(journalWriterOut.text || "").slice(0, 200))
+      if (root.journalDirty) persistDebounce.restart()
     }
   }
 
-  Connections {
-    target: Hyprland.toplevels
-    function onValuesChanged() { cacheDebounce.restart() }
+  Process {
+    id: quarantineProcess
+    running: false
+    onExited: function() { if (root.journalDirty) persistDebounce.restart() }
+  }
+
+  Process {
+    id: bindsProcess
+    property string mode: "status"
+    property bool rerun: false
+    running: false
+    stdout: StdioCollector { id: bindsOut; waitForEnd: true }
+    onExited: function() {
+      var data = null
+      try { data = JSON.parse(String(bindsOut.text || "").slice(0, 65536)) } catch (e) {}
+      if (mode === "status") {
+        if (data) root.bindsStatus = data
+        root.maybeOfferSetup()
+      } else {
+        root.lastInstallResult = data || { status: "error", error: "no response" }
+        if (mode === "install" && data && data.status === "ok") root.toast("✓ Reprieve is active")
+        else if (mode === "remove" && data && data.status === "ok") root.toast("Reprieve bindings removed")
+        rerun = true
+      }
+      if (rerun) { rerun = false; Qt.callLater(root.refreshBindStatus) }
+    }
   }
 
   Timer {
     id: mediaTimeout
     interval: 2500
     repeat: false
-    onTriggered: {
-      if (mediaProcess.running) mediaProcess.running = false
-    }
+    onTriggered: if (mediaProcess.running) mediaProcess.running = false
   }
 
   Process {
     id: mediaProcess
     running: false
-    stdout: StdioCollector {
-      id: mediaOut
-      waitForEnd: true
-    }
-    onRunningChanged: {
-      if (running) mediaTimeout.restart()
-      else mediaTimeout.stop()
-    }
+    stdout: StdioCollector { id: mediaOut; waitForEnd: true }
+    onRunningChanged: { if (running) mediaTimeout.restart(); else mediaTimeout.stop() }
     onExited: function() {
       mediaTimeout.stop()
       if (root.mediaJobKind === "pause") {
-        var payload = root.parseMediaPayload(mediaOut.text)
+        var payload = null
+        try { payload = Model.sanitizeMedia(JSON.parse(String(mediaOut.text || "").slice(0, 4096))) } catch (e) {}
         if (root.mediaJobAddress && payload) {
-          var parked = UndoModel.parkedAddresses(root.model).indexOf(root.mediaJobAddress) !== -1
-          if (parked) {
-            root.model = UndoModel.attachMedia(root.model, root.mediaJobAddress, payload)
-            root.publish()
-          } else {
+          if (Model.findParked(root.model, root.mediaJobAddress) !== -1)
+            root.commit(Model.attachMedia(root.model, root.mediaJobAddress, payload))
+          else
             root.requestResume(payload)
-          }
         }
       }
       root.mediaJobKind = ""
@@ -566,72 +938,50 @@ Item {
     }
   }
 
+  // --------------------------------------------------------------- wiring
+
+  Connections {
+    target: Hyprland.toplevels
+    function onValuesChanged() { cacheDebounce.restart() }
+  }
+
   Connections {
     target: Hyprland
     function onRawEvent(event) {
       var name = String((event && event.name) || "")
+      var data = String((event && event.data) || "")
       if (name === "openwindow") {
-        var raw = String(event.data || "").split(",")[0]
-        var address = UndoModel.normalizeAddress(raw)
-        if (address) {
-          var next = {}
-          for (var key in root.snapshots) next[key] = root.snapshots[key]
-          var existing = next[address] || {}
-          existing.address = address
-          existing.openedAt = Date.now()
-          next[address] = existing
-          root.snapshots = next
-        }
+        var parts = data.split(",")
+        var address = Model.normalizeAddress(parts[0])
+        if (address) root.patchSnapshot(address, { openedAt: Date.now(), workspace: String(parts[1] || ""), class: String(parts[2] || "") })
+        refreshDebounce.restart()
+      } else if (name === "closewindow") {
+        root.handleClose(data.split(",")[0])
         cacheDebounce.restart()
-        return
-      }
-      if (name === "closewindow") {
-        root.recordExternalClose(String(event.data || "").split(",")[0])
-        cacheDebounce.restart()
+      } else if (name === "movewindowv2") {
+        var mv = data.split(",")
+        root.handleMove(mv[0], mv.slice(2).join(","))
+        root.patchSnapshot(mv[0], { workspace: mv.slice(2).join(",") })
+      } else if (name === "changefloatingmode") {
+        var fl = data.split(",")
+        root.patchSnapshot(fl[0], { floating: fl[1] === "1", floatingKnown: true })
+      } else if (name === "fullscreen") {
+        refreshDebounce.restart()
       }
     }
   }
 
-  Timer {
-    id: cacheDebounce
-    interval: 200
-    repeat: false
-    onTriggered: root.cacheToplevels()
-  }
-
-  GlobalShortcut {
-    appid: root.pluginId
-    name: "undo"
-    description: "Undo last desktop window close"
-    onPressed: root.undoLast()
-  }
-
-  GlobalShortcut {
-    appid: root.pluginId
-    name: "redo"
-    description: "Redo last desktop window close"
-    onPressed: root.redoLast()
-  }
-
-  GlobalShortcut {
-    appid: root.pluginId
-    name: "close"
-    description: "Close window (undoable)"
-    onPressed: root.closeActive()
-  }
-
-  GlobalShortcut {
-    appid: root.pluginId
-    name: "kill"
-    description: "Close window permanently"
-    onPressed: root.killActive()
-  }
+  GlobalShortcut { appid: root.pluginId; name: "undo"; description: "Restore the last parked window"; onPressed: root.undoLast() }
+  GlobalShortcut { appid: root.pluginId; name: "redo"; description: "Park it again"; onPressed: root.redoLast() }
+  GlobalShortcut { appid: root.pluginId; name: "park"; description: "Park window (undoable close)"; onPressed: root.parkActive() }
+  GlobalShortcut { appid: root.pluginId; name: "close"; description: "Close window permanently"; onPressed: root.closeActive() }
+  GlobalShortcut { appid: root.pluginId; name: "timeline"; description: "Reprieve timeline"; onPressed: root.openTimeline() }
 
   IpcHandler {
-    target: "io.github.greyforgelabs.desktop-undo"
+    target: "tech.greyforge.reprieve"
 
+    function park(): string { return root.parkActive() }
     function close(): string { return root.closeActive() }
-    function kill(): string { return root.killActive() }
     function undo(): string { return root.undoLast() }
     function redo(): string { return root.redoLast() }
     function restoreAt(arg: string): string {
@@ -646,30 +996,30 @@ Item {
       }
       return root.restoreAt(index, here)
     }
+    function restoreAll(): string { return root.restoreAll() }
+    function closeParked(address: string): string { return root.closeParked(address) }
+    function clear(): string { return root.clearHistory() }
+    function reset(): string { return root.resetAll() }
+    function reconcile(): string { var r = root.reconcile(); return JSON.stringify(r || {}) }
     function status(): string { return root.statusJson() }
-    function reset(): string {
-      root.model = UndoModel.createState({ max: root.maxStack })
-      root.publish()
-      root.lastResult = "reset"
-      return "reset"
-    }
     function setShowToast(arg: string): string {
       var on = arg !== "false" && arg !== "0" && arg !== "off"
       root.setShowToast(on)
-      return root.showToast ? "on" : "off"
+      return on ? "on" : "off"
     }
-    function toggleShowToast(): string {
-      root.toggleShowToast()
-      return root.showToast ? "on" : "off"
-    }
+    function toggleShowToast(): string { var on = !root.showToast; root.setShowToast(on); return on ? "on" : "off" }
+    function bindsStatus(): string { root.refreshBindStatus(); return JSON.stringify(root.bindsStatus || {}) }
+    function installBinds(arg: string): string { return root.installBinds(arg) }
+    function removeBinds(): string { return root.removeBinds() }
   }
 
   Component.onCompleted: {
-    root.model = UndoModel.createState({ max: root.maxStack })
-    if (root.setting("showToast", undefined) !== undefined && !stateFile.text())
-      root.showToast = root.setting("showToast", true) !== false
+    root.model = Model.createState({ max: root.maxStack })
     root.publish()
     root.cacheToplevels()
+    try { Hyprland.refreshToplevels() } catch (e) {}
+    root.readJournal()
+    root.refreshBindStatus()
   }
 
   Component.onDestruction: root.stopMedia()

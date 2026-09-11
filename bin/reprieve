@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# Reprieve CLI and keybind wrapper.
+#
+# `park` and `close` always fall back to a real close when the shell is not
+# answering, so Super+W never turns into a no-op while omarchy-shell restarts.
+set -u
+
+PLUGIN_ID="tech.greyforge.reprieve"
+HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+ACTION="${1:-help}"
+shift || true
+
+ipc() {
+  local method="$1"
+  shift || true
+  timeout 0.6 omarchy-shell "$PLUGIN_ID" "$method" "$@" 2>/dev/null || true
+}
+
+hypr_close_active() {
+  hyprctl dispatch "hl.dsp.window.close()" >/dev/null 2>&1 || hyprctl dispatch killactive >/dev/null 2>&1 || true
+}
+
+need_plugin() {
+  local result
+  result="$(ipc "$@")"
+  if [[ -n "$result" ]]; then
+    printf '%s\n' "$result"
+    return 0
+  fi
+  echo "reprieve: plugin is not running (enable it with: omarchy plugin enable $PLUGIN_ID)" >&2
+  return 1
+}
+
+usage() {
+  cat <<'USAGE'
+Usage: reprieve <command>
+
+  status        Show undo/redo counts and parked windows (JSON)
+  park          Park the focused window (what Super+W does)
+  close         Close the focused window permanently
+  undo          Restore the most recently parked window
+  redo          Park it again
+  timeline      Open the recovery timeline
+  restore-all   Bring every parked window back
+  clear         Forget history (refuses while windows are parked)
+  reset         Restore every parked window, then forget history
+  setup         Open first-run setup (installs keybindings after consent)
+  migrate       Replace an old Desktop Undo configuration with Reprieve
+  install-binds Install keybindings non-interactively (see --help)
+  remove-binds  Remove Reprieve's keybinding block
+  uninstall     Restore parked windows and remove keybindings
+  doctor        Check the installation without changing anything
+USAGE
+}
+
+case "$ACTION" in
+  park)
+    result="$(ipc park)"
+    case "$result" in
+      parked|empty) exit 0 ;;
+      *) hypr_close_active; exit 0 ;;
+    esac
+    ;;
+  close|kill|permanent)
+    result="$(ipc close)"
+    case "$result" in
+      closed|empty) exit 0 ;;
+      *) hypr_close_active; exit 0 ;;
+    esac
+    ;;
+  undo|redo|status)
+    need_plugin "$ACTION"
+    ;;
+  restore-all|restoreAll)
+    need_plugin restoreAll
+    ;;
+  clear)
+    need_plugin clear
+    ;;
+  reset)
+    need_plugin reset
+    ;;
+  timeline)
+    if ! omarchy-shell shell summon "$PLUGIN_ID" '{"view":"timeline"}' >/dev/null 2>&1; then
+      echo "reprieve: plugin is not running" >&2
+      exit 1
+    fi
+    ;;
+  setup|migrate)
+    if ! omarchy-shell shell summon "$PLUGIN_ID" '{"view":"setup"}' >/dev/null 2>&1; then
+      echo "reprieve: shell is not running; installing bindings directly" >&2
+      exec python3 "$HERE/reprieve-binds" install "$@"
+    fi
+    ;;
+  install-binds)
+    exec python3 "$HERE/reprieve-binds" install "$@"
+    ;;
+  remove-binds)
+    exec python3 "$HERE/reprieve-binds" remove "$@"
+    ;;
+  binds)
+    exec python3 "$HERE/reprieve-binds" "$@"
+    ;;
+  uninstall)
+    restored="$(ipc restoreAll)"
+    [[ -n "$restored" ]] && echo "reprieve: restored parked windows: $restored"
+    python3 "$HERE/reprieve-binds" remove
+    echo "reprieve: now run: omarchy plugin remove $PLUGIN_ID"
+    ;;
+  doctor)
+    exec python3 "$HERE/reprieve-doctor" "$@"
+    ;;
+  help|-h|--help)
+    usage
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac

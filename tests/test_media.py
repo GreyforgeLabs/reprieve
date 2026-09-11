@@ -3,9 +3,11 @@ import importlib.machinery
 import unittest
 from pathlib import Path
 
-MEDIA = Path(__file__).resolve().parents[1] / "bin" / "media"
-loader = importlib.machinery.SourceFileLoader("desktop_undo_media", str(MEDIA))
-mod = loader.load_module()
+MEDIA = Path(__file__).resolve().parents[1] / "bin" / "reprieve-media"
+import importlib.util
+spec = importlib.util.spec_from_loader("reprieve_media", importlib.machinery.SourceFileLoader("reprieve_media", str(MEDIA)))
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
 
 
 FIXTURE = """

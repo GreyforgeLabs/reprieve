@@ -1,0 +1,595 @@
+#!/usr/bin/env python3
+"""Reprieve keybinding manager for ~/.config/hypr/bindings.lua.
+
+    reprieve-binds status  [--json]
+    reprieve-binds install [--json] [--undo KEY] [--redo KEY] [--timeline KEY]
+                           [--skip ACTION,...] [--replace ACTION,...] [--no-reload]
+    reprieve-binds remove  [--json] [--no-reload]
+
+Reprieve owns exactly one marked block:
+
+    -- BEGIN tech.greyforge.reprieve
+    ...
+    -- END tech.greyforge.reprieve
+
+Everything else in bindings.lua is the user's and is never touched. Writes
+are atomic (backup, same-directory temp file, rename) and symlinks or
+non-regular files are refused. Legacy Desktop Undo blocks are recognised and
+removed only as part of an explicit install/migrate.
+
+Conflict policy: Super+W is the product and replaces the stock Omarchy close
+binding when the user runs install (that is the consent). A custom Super+W,
+or any other occupied shortcut, is never overwritten silently: install skips
+it and reports the conflict unless the action is listed in --replace, or an
+alternate key is supplied.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import time
+
+PLUGIN_ID = "tech.greyforge.reprieve"
+BEGIN = f"-- BEGIN {PLUGIN_ID}"
+END = f"-- END {PLUGIN_ID}"
+LEGACY_IDS = ["io.github.greyforgelabs.desktop-undo", "io.github.chris.desktop-undo"]
+LEGACY_DESCRIPTIONS = {
+    "Close window (undoable)",
+    "Close window permanently",
+    "Desktop undo",
+    "Desktop redo",
+    "Desktop undo timeline",
+}
+STOCK_CLOSE_DESCRIPTION = "Close window"
+
+DESCRIPTIONS = {
+    "park": "Park window (Reprieve)",
+    "close": "Close window permanently",
+    "undo": "Restore parked window",
+    "redo": "Redo park",
+    "timeline": "Reprieve timeline",
+}
+DEFAULT_KEYS = {
+    "park": "SUPER + W",
+    "close": "SUPER + ALT + W",
+    "undo": "SUPER + Z",
+    "redo": "SUPER + Y",
+    "timeline": "SUPER + SHIFT + Z",
+}
+ALTERNATE_KEYS = {
+    "undo": "SUPER + ALT + Z",
+    "redo": "SUPER + ALT + Y",
+    "timeline": "SUPER + SHIFT + ALT + Z",
+    "close": "SUPER + SHIFT + ALT + W",
+}
+OPTIONAL_ACTIONS = ["undo", "redo", "timeline", "close"]
+MOD_MASK = {"SHIFT": 1, "CAPS": 2, "CTRL": 4, "ALT": 8, "MOD2": 16, "MOD3": 32, "SUPER": 64, "MOD5": 128}
+KEY_RE = re.compile(r"^[A-Za-z0-9_]{1,32}$")
+MAX_CONFIG_BYTES = 1024 * 1024
+
+
+class BindError(Exception):
+    pass
+
+
+# --- paths -----------------------------------------------------------------
+
+def config_path() -> str:
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    return os.path.join(base, "hypr", "bindings.lua")
+
+
+def plugin_dir() -> str:
+    here = os.path.dirname(os.path.realpath(__file__))
+    return os.path.dirname(here)
+
+
+def cli_path() -> str:
+    return os.path.join(plugin_dir(), "bin", "reprieve")
+
+
+def local_bin_link() -> str:
+    return os.path.join(os.path.expanduser("~"), ".local", "bin", "reprieve")
+
+
+# --- key parsing -----------------------------------------------------------
+
+def normalize_key(text: str) -> str:
+    parts = [p.strip() for p in str(text or "").replace("+", " + ").split("+")]
+    parts = [p for p in parts if p]
+    if not parts:
+        raise BindError("empty key combination")
+    mods = []
+    key = parts[-1]
+    for mod in parts[:-1]:
+        up = mod.upper()
+        if up not in MOD_MASK:
+            raise BindError(f"unknown modifier: {mod}")
+        if up in mods:
+            raise BindError(f"duplicate modifier: {mod}")
+        mods.append(up)
+    if not KEY_RE.match(key):
+        raise BindError(f"unsupported key: {key}")
+    if "SUPER" not in mods:
+        raise BindError("Reprieve shortcuts must include SUPER")
+    order = ["SUPER", "SHIFT", "CTRL", "ALT", "CAPS", "MOD2", "MOD3", "MOD5"]
+    mods.sort(key=order.index)
+    return " + ".join(mods + [key.upper() if len(key) == 1 else key])
+
+
+def key_signature(key: str) -> tuple[int, str]:
+    parts = [p.strip() for p in key.split("+")]
+    mask = 0
+    for mod in parts[:-1]:
+        mask |= MOD_MASK[mod.upper()]
+    return mask, parts[-1].lower()
+
+
+def pretty_key(key: str) -> str:
+    return key.replace("SUPER", "Super").replace("SHIFT", "Shift").replace("CTRL", "Ctrl").replace("ALT", "Alt").replace(" + ", "+")
+
+
+# --- config file handling --------------------------------------------------
+
+def check_config(path: str, must_exist: bool) -> None:
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        if must_exist:
+            raise BindError(f"no such file: {path}")
+        return
+    if stat.S_ISLNK(st.st_mode):
+        raise BindError(f"refusing to follow symlink: {path}")
+    if not stat.S_ISREG(st.st_mode):
+        raise BindError(f"not a regular file: {path}")
+    if st.st_size > MAX_CONFIG_BYTES:
+        raise BindError(f"config unexpectedly large (> {MAX_CONFIG_BYTES} bytes): {path}")
+
+
+def read_config(path: str) -> str:
+    check_config(path, must_exist=False)
+    if not os.path.lexists(path):
+        return ""
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    with os.fdopen(fd, "rb") as fh:
+        data = fh.read(MAX_CONFIG_BYTES + 1)
+    if len(data) > MAX_CONFIG_BYTES:
+        raise BindError("config unexpectedly large")
+    return data.decode("utf-8")
+
+
+def write_config_atomic(path: str, text: str) -> str | None:
+    """Backup + temp file + rename. Returns the backup path (None if new)."""
+    directory = os.path.dirname(path)
+    os.makedirs(directory, exist_ok=True)
+    check_config(path, must_exist=False)
+    backup = None
+    if os.path.lexists(path):
+        backup = f"{path}.bak.{time.strftime('%Y%m%d%H%M%S')}"
+        shutil.copy2(path, backup)
+        mode = stat.S_IMODE(os.lstat(path).st_mode)
+    else:
+        mode = 0o644
+    tmp = os.path.join(directory, f".bindings.lua.{os.getpid()}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(text.encode("utf-8"))
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.chmod(tmp, mode)
+        # Re-check right before the swap so a symlink dropped in between the
+        # first check and now is still refused.
+        check_config(path, must_exist=False)
+        os.rename(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    return backup
+
+
+def block_pattern(plugin_id: str) -> re.Pattern:
+    pid = re.escape(plugin_id)
+    return re.compile(rf"^[ \t]*-- BEGIN {pid}[ \t]*\n.*?^[ \t]*-- END {pid}[ \t]*\n?", re.S | re.M)
+
+
+def find_blocks(text: str, plugin_id: str) -> list[tuple[int, int]]:
+    return [(m.start(), m.end()) for m in block_pattern(plugin_id).finditer(text)]
+
+
+def has_dangling_marker(text: str, plugin_id: str) -> bool:
+    begins = len(re.findall(rf"^[ \t]*-- BEGIN {re.escape(plugin_id)}[ \t]*$", text, re.M))
+    ends = len(re.findall(rf"^[ \t]*-- END {re.escape(plugin_id)}[ \t]*$", text, re.M))
+    return begins != ends or begins != len(find_blocks(text, plugin_id))
+
+
+def strip_blocks(text: str, plugin_id: str) -> tuple[str, int]:
+    pattern = block_pattern(plugin_id)
+    new_text, n = pattern.subn("", text)
+    if n:
+        new_text = re.sub(r"\n{3,}", "\n\n", new_text)
+    return new_text, n
+
+
+def text_outside_blocks(text: str) -> str:
+    """The user's own configuration, with every recognised managed block removed."""
+    out = text
+    for pid in [PLUGIN_ID] + LEGACY_IDS:
+        out, _ = strip_blocks(out, pid)
+    return out
+
+
+def lua_long_string(value: str) -> str:
+    if "]=]" in value or "\n" in value:
+        raise BindError("plugin path contains characters that cannot be embedded safely")
+    return f"[=[{value}]=]"
+
+
+def render_block(keys: dict[str, str], unbind: list[str]) -> str:
+    cli = lua_long_string(cli_path())
+    lines = [
+        BEGIN,
+        "-- Managed by Reprieve (reprieve setup / reprieve remove-binds). Do not hand-edit.",
+    ]
+    for key in unbind:
+        lines.append(f'hl.unbind("{key}")')
+    lines.append(f'o.bind("{keys["park"]}", "{DESCRIPTIONS["park"]}", {cli} .. " park")')
+    if "close" in keys:
+        lines.append(f'o.bind("{keys["close"]}", "{DESCRIPTIONS["close"]}", {cli} .. " close")')
+    for action in ("undo", "redo", "timeline"):
+        if action in keys:
+            lines.append(
+                f'o.bind("{keys[action]}", "{DESCRIPTIONS[action]}", hl.dsp.global("{PLUGIN_ID}:{action}"))'
+            )
+    lines.append('hl.window_rule({ match = { workspace = "special:reprieve" }, no_anim = true })')
+    lines.append('hl.layer_rule({ match = { namespace = "reprieve" }, no_anim = true, animation = "none" })')
+    lines.append('hl.layer_rule({ match = { namespace = "reprieve-toast" }, no_anim = true, animation = "none" })')
+    lines.append(END)
+    return "\n".join(lines) + "\n"
+
+
+# --- live bind inspection --------------------------------------------------
+
+def hyprctl_available() -> bool:
+    return shutil.which("hyprctl") is not None and bool(os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"))
+
+
+def live_binds() -> list[dict] | None:
+    if not hyprctl_available():
+        return None
+    try:
+        proc = subprocess.run(["hyprctl", "-j", "binds"], capture_output=True, text=True, timeout=2.0)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+    try:
+        data = json.loads(proc.stdout)
+    except ValueError:
+        return None
+    return data if isinstance(data, list) else None
+
+
+def live_owner(binds: list[dict] | None, key: str) -> str | None:
+    """Description of the live bind occupying `key` (None if free/unknown)."""
+    if binds is None:
+        return None
+    mask, name = key_signature(key)
+    for b in binds:
+        try:
+            if int(b.get("modmask", -1)) != mask:
+                continue
+            if str(b.get("submap") or ""):
+                continue
+            if str(b.get("key") or "").lower() != name:
+                continue
+        except (TypeError, ValueError):
+            continue
+        return str(b.get("description") or "") or "(unnamed binding)"
+    return None
+
+
+def textual_owner(user_text: str, key: str) -> str | None:
+    """Best-effort: does the user's own bindings.lua bind this key?"""
+    mask, name = key_signature(key)
+    pattern = re.compile(r'o\.bind\(\s*"([^"]+)"\s*,\s*("([^"]*)"|nil)?', re.S)
+    for m in pattern.finditer(user_text):
+        try:
+            candidate = normalize_key(m.group(1))
+        except BindError:
+            continue
+        if key_signature(candidate) == (mask, name):
+            return m.group(3) or "(custom binding)"
+    return None
+
+
+def reload_hyprland() -> bool:
+    if not hyprctl_available():
+        return False
+    try:
+        proc = subprocess.run(["hyprctl", "reload"], capture_output=True, text=True, timeout=5.0)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return proc.returncode == 0
+
+
+def ours_live(binds: list[dict] | None) -> dict[str, bool]:
+    found = {a: False for a in DESCRIPTIONS}
+    if binds is None:
+        return found
+    for b in binds:
+        desc = str(b.get("description") or "")
+        for action, text in DESCRIPTIONS.items():
+            if desc == text:
+                found[action] = True
+    return found
+
+
+# --- commands --------------------------------------------------------------
+
+def status(path: str) -> dict:
+    out = {
+        "config": path,
+        "installed": False,
+        "legacy": [],
+        "malformed": [],
+        "file": "ok",
+        "live": {},
+        "conflicts": [],
+        "cli_link": None,
+    }
+    try:
+        text = read_config(path)
+    except BindError as exc:
+        out["file"] = str(exc)
+        text = ""
+    out["installed"] = bool(find_blocks(text, PLUGIN_ID))
+    for pid in LEGACY_IDS:
+        if find_blocks(text, pid):
+            out["legacy"].append(pid)
+        elif pid in text:
+            out["malformed"].append(pid)
+    if has_dangling_marker(text, PLUGIN_ID):
+        out["malformed"].append(PLUGIN_ID)
+    binds = live_binds()
+    out["live"] = ours_live(binds)
+    out["hyprland"] = binds is not None
+    user_text = text_outside_blocks(text)
+    for action, key in DEFAULT_KEYS.items():
+        owner = live_owner(binds, key)
+        if owner is None:
+            owner = textual_owner(user_text, key)
+        if owner is None:
+            continue
+        if owner in DESCRIPTIONS.values() or owner in LEGACY_DESCRIPTIONS:
+            continue
+        if action == "park" and owner == STOCK_CLOSE_DESCRIPTION:
+            continue
+        out["conflicts"].append({
+            "action": action,
+            "key": key,
+            "pretty": pretty_key(key),
+            "owner": owner,
+            "alternate": ALTERNATE_KEYS.get(action),
+        })
+    link = local_bin_link()
+    if os.path.islink(link):
+        out["cli_link"] = os.readlink(link)
+    elif os.path.lexists(link):
+        out["cli_link"] = "foreign"
+    return out
+
+
+def install(path: str, overrides: dict[str, str], skip: set[str], replace: set[str], reload: bool) -> dict:
+    result = {"status": "ok", "installed": False, "keys": {}, "skipped": [], "conflicts": [],
+              "migrated": [], "backup": None, "reloaded": False, "verified": {}, "unbound": []}
+    text = read_config(path)
+    if has_dangling_marker(text, PLUGIN_ID):
+        raise BindError("bindings.lua has an unbalanced Reprieve marker block; repair it by hand first")
+
+    # Explicit migration: drop recognised legacy blocks, nothing else.
+    for pid in LEGACY_IDS:
+        text, n = strip_blocks(text, pid)
+        if n:
+            result["migrated"].append(pid)
+    text, _ = strip_blocks(text, PLUGIN_ID)
+    user_text = text_outside_blocks(text)
+
+    binds = live_binds()
+    keys: dict[str, str] = {}
+    unbind: list[str] = []
+
+    for action in ["park"] + OPTIONAL_ACTIONS:
+        if action in skip and action != "park":
+            result["skipped"].append(action)
+            continue
+        key = normalize_key(overrides.get(action) or DEFAULT_KEYS[action])
+        owner = live_owner(binds, key)
+        if owner is None:
+            owner = textual_owner(user_text, key)
+        ours = owner in DESCRIPTIONS.values() or owner in LEGACY_DESCRIPTIONS
+        if owner is None or ours:
+            if ours or (action == "park"):
+                unbind.append(key)
+            keys[action] = key
+            continue
+        if action == "park" and owner == STOCK_CLOSE_DESCRIPTION:
+            unbind.append(key)
+            keys[action] = key
+            continue
+        if action in replace:
+            unbind.append(key)
+            keys[action] = key
+            result["unbound"].append({"action": action, "key": key, "owner": owner})
+            continue
+        conflict = {"action": action, "key": key, "pretty": pretty_key(key), "owner": owner,
+                    "alternate": ALTERNATE_KEYS.get(action)}
+        result["conflicts"].append(conflict)
+        if action == "park":
+            result["status"] = "conflict"
+            return result
+        result["skipped"].append(action)
+
+    seen = {}
+    for action, key in keys.items():
+        sig = key_signature(key)
+        if sig in seen:
+            raise BindError(f"{pretty_key(key)} requested for both {seen[sig]} and {action}")
+        seen[sig] = action
+
+    block = render_block(keys, list(dict.fromkeys(unbind)))
+    body = text.rstrip("\n")
+    new_text = (body + "\n\n" if body else "") + block
+    result["backup"] = write_config_atomic(path, new_text)
+    result["installed"] = True
+    result["keys"] = {a: pretty_key(k) for a, k in keys.items()}
+
+    link_state = ensure_cli_link()
+    result["cli_link"] = link_state
+
+    if reload:
+        result["reloaded"] = reload_hyprland()
+        if result["reloaded"]:
+            result["verified"] = {a: v for a, v in ours_live(live_binds()).items() if a in keys}
+    return result
+
+
+def remove(path: str, reload: bool) -> dict:
+    result = {"status": "ok", "removed": 0, "backup": None, "reloaded": False}
+    if not os.path.lexists(path):
+        return result
+    text = read_config(path)
+    new_text, n = strip_blocks(text, PLUGIN_ID)
+    if n == 0:
+        if has_dangling_marker(text, PLUGIN_ID):
+            raise BindError("bindings.lua has an unbalanced Reprieve marker block; repair it by hand first")
+        result["cli_link"] = remove_cli_link()
+        return result
+    result["backup"] = write_config_atomic(path, new_text)
+    result["removed"] = n
+    result["cli_link"] = remove_cli_link()
+    if reload:
+        result["reloaded"] = reload_hyprland()
+    return result
+
+
+def ensure_cli_link() -> str:
+    """Symlink ~/.local/bin/reprieve -> plugin bin. Never clobbers a foreign file."""
+    link = local_bin_link()
+    target = cli_path()
+    bindir = os.path.dirname(link)
+    if not os.path.isdir(bindir):
+        return "no-local-bin"
+    if os.path.islink(link):
+        if os.readlink(link) == target:
+            return "ok"
+        if plugin_dir() in os.readlink(link) or "reprieve" in os.path.basename(os.readlink(link)):
+            os.unlink(link)
+        else:
+            return "foreign"
+    elif os.path.lexists(link):
+        return "foreign"
+    try:
+        os.symlink(target, link)
+    except OSError:
+        return "error"
+    return "ok"
+
+
+def remove_cli_link() -> str:
+    link = local_bin_link()
+    if os.path.islink(link) and os.readlink(link) == cli_path():
+        try:
+            os.unlink(link)
+            return "removed"
+        except OSError:
+            return "error"
+    return "absent"
+
+
+# --- entry point -----------------------------------------------------------
+
+def print_status_human(s: dict) -> None:
+    print(f"Config     {s['config']}")
+    print(f"File       {s['file']}")
+    print(f"Installed  {'yes' if s['installed'] else 'no'}")
+    if s["legacy"]:
+        print(f"Legacy     {', '.join(s['legacy'])}")
+    if s["malformed"]:
+        print(f"Malformed  {', '.join(s['malformed'])}")
+    if s.get("hyprland"):
+        live = ", ".join(a for a, v in s["live"].items() if v) or "none"
+        print(f"Live       {live}")
+    for c in s["conflicts"]:
+        alt = f" (alternate: {pretty_key(c['alternate'])})" if c.get("alternate") else ""
+        print(f"Conflict   {c['pretty']} is used by '{c['owner']}'{alt}")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="reprieve-binds")
+    parser.add_argument("action", choices=["status", "install", "migrate", "remove"])
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--config", default=config_path())
+    parser.add_argument("--undo")
+    parser.add_argument("--redo")
+    parser.add_argument("--timeline")
+    parser.add_argument("--close")
+    parser.add_argument("--skip", default="")
+    parser.add_argument("--replace", default="")
+    parser.add_argument("--no-reload", action="store_true")
+    args = parser.parse_args()
+
+    try:
+        if args.action == "status":
+            out = status(args.config)
+            if args.json:
+                print(json.dumps(out))
+            else:
+                print_status_human(out)
+            return 0
+        if args.action in ("install", "migrate"):
+            overrides = {k: v for k, v in {"undo": args.undo, "redo": args.redo,
+                                            "timeline": args.timeline, "close": args.close}.items() if v}
+            skip = {s.strip() for s in args.skip.split(",") if s.strip()}
+            replace = {s.strip() for s in args.replace.split(",") if s.strip()}
+            for name in skip | replace | set(overrides):
+                if name not in DEFAULT_KEYS:
+                    raise BindError(f"unknown action: {name}")
+            out = install(args.config, overrides, skip, replace, reload=not args.no_reload)
+            if args.json:
+                print(json.dumps(out))
+            elif out["status"] == "conflict":
+                for c in out["conflicts"]:
+                    print(f"reprieve: {c['pretty']} is bound to '{c['owner']}'. Re-run with --replace {c['action']} to take it over.")
+                return 3
+            else:
+                print("reprieve: bindings installed" + (" and Hyprland reloaded" if out["reloaded"] else ""))
+                for c in out["conflicts"]:
+                    alt = f"; alternate --{c['action']} \"{c['alternate']}\"" if c.get("alternate") else ""
+                    print(f"reprieve: skipped {c['pretty']} (used by '{c['owner']}'{alt})")
+            return 0 if out["status"] == "ok" else 3
+        out = remove(args.config, reload=not args.no_reload)
+        if args.json:
+            print(json.dumps(out))
+        else:
+            print("reprieve: bindings removed" if out["removed"] else "reprieve: no Reprieve bindings to remove")
+        return 0
+    except BindError as exc:
+        if args.json:
+            print(json.dumps({"status": "error", "error": str(exc)}))
+        else:
+            print(f"reprieve: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

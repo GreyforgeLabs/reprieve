@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "id": "io.github.greyforgelabs.desktop-undo",
-  "name": "Tile Park and Undo",
-  "version": "1.2.3",
+  "id": "tech.greyforge.reprieve",
+  "name": "Reprieve",
+  "version": "0.9.0",
   "author": "Greyforge Labs",
   "license": "MIT",
-  "homepage": "https://github.com/GreyforgeLabs/omarchy-desktop-undo",
-  "description": "For accidental Super+W: parks the window instead of killing it, so you can undo the last 10 closes. Like minimize on a tiling compositor. Super+Z restores, Super+Y redoes. Super+Alt+W still closes for real.",
+  "homepage": "https://github.com/GreyforgeLabs/reprieve",
+  "description": "Hit Super+W by accident? Reprieve parks the window instead of killing it. Super+Z brings it back exactly as it was. Parked windows survive shell reloads.",
   "kinds": ["service", "overlay"],
   "keepLoaded": true,
   "entryPoints": {

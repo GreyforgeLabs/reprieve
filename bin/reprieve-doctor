@@ -1,0 +1,148 @@
+#!/usr/bin/env python3
+"""reprieve doctor — read-only health check. Never modifies anything."""
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+
+PLUGIN_ID = "tech.greyforge.reprieve"
+PARK_WORKSPACE = "special:reprieve"
+HERE = os.path.dirname(os.path.realpath(__file__))
+
+
+def run(cmd: list[str], timeout: float = 2.0) -> tuple[int, str]:
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired):
+        return 1, ""
+    return proc.returncode, proc.stdout
+
+
+def load_json(text: str):
+    try:
+        return json.loads(text)
+    except ValueError:
+        return None
+
+
+def main() -> int:
+    as_json = "--json" in sys.argv[1:]
+    rows: list[tuple[str, str, bool]] = []  # (label, value, ok)
+    problems: list[str] = []
+
+    # Hyprland
+    session = os.environ.get("HYPRLAND_INSTANCE_SIGNATURE") or ""
+    hypr_ok = bool(session) and shutil.which("hyprctl") is not None
+    clients = []
+    if hypr_ok:
+        rc, out = run(["hyprctl", "-j", "clients"])
+        data = load_json(out) if rc == 0 else None
+        if isinstance(data, list):
+            clients = data
+        else:
+            hypr_ok = False
+    rows.append(("Hyprland", "OK" if hypr_ok else "not reachable", hypr_ok))
+    rows.append(("Session", session[:24] + ("…" if len(session) > 24 else "") if session else "unknown", bool(session)))
+
+    # Plugin
+    rc, out = run(["omarchy-shell", PLUGIN_ID, "status"], timeout=3.0)
+    status = load_json(out) if rc == 0 and out.strip() else None
+    plugin_ok = isinstance(status, dict)
+    rows.append(("Plugin", "OK" if plugin_ok else "not running", plugin_ok))
+    if not plugin_ok:
+        problems.append(f"plugin not answering; enable it with: omarchy plugin enable {PLUGIN_ID}")
+
+    # Journal
+    rc, out = run(["python3", os.path.join(HERE, "reprieve-journal"), "inspect"])
+    journal = load_json(out) if rc == 0 else None
+    jstatus = (journal or {}).get("status", "unknown")
+    if jstatus in ("ok", "empty"):
+        detail = "OK" if jstatus == "ok" else "OK (empty)"
+        j_ok = True
+        if jstatus == "ok" and journal.get("current_session") is False:
+            detail = "stale (other session)"
+    else:
+        detail = jstatus
+        j_ok = False
+        problems.append(f"recovery journal is {jstatus}; the plugin quarantines it on next start")
+    rows.append(("Journal", detail, j_ok))
+
+    # Parked / stranded
+    hidden = [c for c in clients if isinstance(c, dict)
+              and str((c.get("workspace") or {}).get("name") or "") == PARK_WORKSPACE]
+    hidden_addrs = {str(c.get("address") or "") for c in hidden}
+    tracked = int((status or {}).get("parked") or 0) if plugin_ok else None
+    tracked_addrs = set((status or {}).get("addresses") or []) if plugin_ok else set()
+    stranded = sorted(hidden_addrs - tracked_addrs) if plugin_ok else sorted(hidden_addrs)
+    rows.append(("Parked windows", str(tracked if tracked is not None else len(hidden)), True))
+    stranded_ok = len(stranded) == 0
+    rows.append(("Stranded", str(len(stranded)), stranded_ok))
+    if not stranded_ok:
+        problems.append("windows are hidden on special:reprieve without a timeline entry; run: reprieve restore-all")
+
+    # Bindings
+    rc, out = run(["python3", os.path.join(HERE, "reprieve-binds"), "status", "--json"])
+    binds = load_json(out) if rc == 0 else None
+    if binds is None:
+        rows.append(("Bindings", "unknown", False))
+        problems.append("could not inspect bindings.lua")
+    else:
+        installed = bool(binds.get("installed"))
+        live = binds.get("live") or {}
+        if installed and live.get("park"):
+            rows.append(("Bindings", "OK", True))
+        elif installed:
+            rows.append(("Bindings", "installed, not live (reload Hyprland)", False))
+            problems.append("bindings are in bindings.lua but Hyprland has not loaded them: hyprctl reload")
+        else:
+            rows.append(("Bindings", "not installed", False))
+            problems.append("keybindings not installed; run: reprieve setup")
+        if binds.get("legacy"):
+            rows.append(("Legacy config", ", ".join(binds["legacy"]), False))
+            problems.append("old Desktop Undo bindings present; run: reprieve migrate")
+        if binds.get("malformed"):
+            rows.append(("Marker blocks", "malformed: " + ", ".join(binds["malformed"]), False))
+            problems.append("bindings.lua has an unbalanced marker block; inspect it by hand")
+        conflicts = binds.get("conflicts") or []
+        if conflicts:
+            text = "; ".join(f"{c['pretty']} → {c['owner']}" for c in conflicts)
+            rows.append(("Conflicts", text, False))
+            problems.append("some shortcuts are occupied by other bindings (see reprieve setup)")
+        else:
+            rows.append(("Conflicts", "none", True))
+
+    # Legacy plugin still enabled?
+    rc, out = run(["omarchy-plugin-list"], timeout=3.0)
+    if rc == 0:
+        for line in out.splitlines():
+            if line.startswith("io.github.greyforgelabs.desktop-undo") and " enabled " in line:
+                rows.append(("Legacy plugin", "Desktop Undo still enabled", False))
+                problems.append("disable the old plugin: omarchy plugin disable io.github.greyforgelabs.desktop-undo")
+
+    # Media helper
+    media_bins = ["pactl", "busctl", "python3"]
+    missing = [b for b in media_bins if shutil.which(b) is None]
+    rows.append(("Media helper", "OK" if not missing else "missing " + ", ".join(missing), not missing))
+
+    passed = all(ok for _, _, ok in rows)
+    if as_json:
+        print(json.dumps({"pass": passed, "rows": [{"label": l, "value": v, "ok": ok} for l, v, ok in rows],
+                          "problems": problems}))
+        return 0 if passed else 1
+
+    print("Reprieve Doctor\n")
+    width = max(len(label) for label, _, _ in rows) + 3
+    for label, value, ok in rows:
+        print(f"{label.ljust(width)}{value}{'' if ok else '   ✗'}")
+    print()
+    print("PASS" if passed else "FAIL")
+    for p in problems:
+        print(f"  - {p}")
+    return 0 if passed else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
