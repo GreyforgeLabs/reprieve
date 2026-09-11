@@ -6,7 +6,7 @@
 | Machine | greyarch (Omarchy 4.0.3-1, shell `4.0.0.alpha`) |
 | Hyprland | 0.56.2 (`efb50993`), Lua config |
 | Quickshell | 0.3.1 |
-| Reprieve commit under test | `feb8348` (product files identical in the tagged `v1.0.0` commit; only `tests/live/acceptance.sh` cleanup and this document changed afterwards) |
+| Reprieve code under test | the `v1.0.0` tag (product files byte-identical to the tree the matrix ran on; only `tests/live/acceptance.sh` cleanup and this document were touched afterwards) |
 | Install method | `omarchy plugin add https://github.com/GreyforgeLabs/reprieve.git --enable --yes` on a machine with no prior Reprieve state |
 | Automated matrix | `tests/live/acceptance.sh` — **33 passed, 0 failed** (full mode, two `omarchy restart shell` cycles) |
 
@@ -44,13 +44,12 @@ run; the matrix ends by asserting the hidden workspace is empty.
 
 ## Defects found and fixed during qualification
 
-- Hyprland 0.56 `window.float` treats `action = "set"`/`"unset"` as toggle
-  (inherited from upstream); restore flipped floating state. Fixed with
-  `enable`/`disable`.
+- Hyprland 0.56 `window.float` treats `action = "set"`/`"unset"` as toggle;
+  restore flipped floating state. Fixed with `enable`/`disable`.
 - Omarchy 4.0.3 gives third-party plugins no `shell.shellConfig`; settings
   silently defaulted. Fixed by reading `shell.json` from disk.
-- Omarchy strips `__sourceDir` from third-party manifests; the media helper
-  path was empty upstream. Fixed by resolving from `Qt.resolvedUrl`.
+- Omarchy strips `__sourceDir` from third-party manifests, which left the media
+  helper path empty. Fixed by resolving from `Qt.resolvedUrl`.
 - PipeWire stream-restore remembered "muted" for apps closed while parked.
   Fixed by queueing Reprieve's own closes behind the unmute job.
 - The auto-opened setup card could take a stray Enter as consent. Fixed by

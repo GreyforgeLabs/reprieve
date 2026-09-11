@@ -11,7 +11,7 @@ for f in "${runtime[@]}"; do
     fail=1
   fi
 done
-if grep -rn -E "special:desktop-undo|desktop-undo\.json" --exclude-dir=.git --exclude-dir=tests --exclude=ORIGINS.md --exclude=CHANGELOG.md --exclude=README.md . ; then
+if grep -rn -E "special:desktop-undo|desktop-undo\.json" --exclude-dir=.git --exclude-dir=tests --exclude=CHANGELOG.md --exclude=README.md . ; then
   echo "stale runtime namespace found" >&2
   fail=1
 fi

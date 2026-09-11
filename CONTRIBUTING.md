@@ -45,5 +45,4 @@ tests/               offline tests
 
 ## Commits
 
-Small, explained commits. Keep the MIT notice; add Greyforge copyright only
-to Greyforge-authored work.
+Small, explained commits. Keep the LICENSE notice intact.

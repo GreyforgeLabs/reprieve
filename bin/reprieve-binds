@@ -14,8 +14,8 @@ Reprieve owns exactly one marked block:
 
 Everything else in bindings.lua is the user's and is never touched. Writes
 are atomic (backup, same-directory temp file, rename) and symlinks or
-non-regular files are refused. Legacy Desktop Undo blocks are recognised and
-removed only as part of an explicit install/migrate.
+non-regular files are refused. Legacy desktop-undo marker blocks are
+recognised and removed only as part of an explicit install/migrate.
 
 Conflict policy: Super+W is the product and replaces the stock Omarchy close
 binding when the user runs install (that is the consent). A custom Super+W,

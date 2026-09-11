@@ -102,7 +102,7 @@ def main() -> int:
             problems.append("keybindings not installed; run: reprieve setup")
         if binds.get("legacy"):
             rows.append(("Legacy config", ", ".join(binds["legacy"]), False))
-            problems.append("old Desktop Undo bindings present; run: reprieve migrate")
+            problems.append("legacy desktop-undo bindings present; run: reprieve migrate")
         if binds.get("malformed"):
             rows.append(("Marker blocks", "malformed: " + ", ".join(binds["malformed"]), False))
             problems.append("bindings.lua has an unbalanced marker block; inspect it by hand")
@@ -119,7 +119,7 @@ def main() -> int:
     if rc == 0:
         for line in out.splitlines():
             if line.startswith("io.github.greyforgelabs.desktop-undo") and " enabled " in line:
-                rows.append(("Legacy plugin", "Desktop Undo still enabled", False))
+                rows.append(("Legacy plugin", "desktop-undo still enabled", False))
                 problems.append("disable the old plugin: omarchy plugin disable io.github.greyforgelabs.desktop-undo")
 
     # Media helper

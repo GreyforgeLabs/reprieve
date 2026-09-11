@@ -157,7 +157,7 @@ reprieve restore-all   Bring every parked window back
 reprieve clear         Forget history — refuses while windows are parked
 reprieve reset         Restore every parked window, then forget history
 reprieve setup         Open the setup card (installs bindings after consent)
-reprieve migrate       Same card, for old Desktop Undo installs
+reprieve migrate       Same card, for legacy desktop-undo installs
 reprieve install-binds Non-interactive install (--undo/--redo/--timeline KEY,
                        --skip a,b, --replace a,b)
 reprieve remove-binds  Remove Reprieve's marked block, nothing else
@@ -203,13 +203,13 @@ On Reprieve's entry in the `plugins[]` array of `~/.config/omarchy/shell.json`:
 
 The overlay follows the current Omarchy theme; there are no color settings.
 
-## Migrating from Desktop Undo
+## Migrating from an earlier close-parking plugin
 
-If `bindings.lua` still carries a `io.github.greyforgelabs.desktop-undo` block, the
-setup card reads **Migrate to Reprieve**. Migration backs up the file, removes
-only the recognised legacy block(s), writes Reprieve's block atomically,
-reloads Hyprland and verifies. Then disable the old plugin so two parkers never
-share `Super+W`:
+If `bindings.lua` still carries a legacy `desktop-undo` marker block, the setup
+card reads **Migrate to Reprieve**. Migration backs up the file, removes only
+the recognised legacy block(s), writes Reprieve's block atomically, reloads
+Hyprland and verifies. Then disable the old plugin so two parkers never share
+`Super+W`:
 
 ```sh
 omarchy plugin disable io.github.greyforgelabs.desktop-undo
@@ -260,17 +260,6 @@ rm -rf ~/.local/state/reprieve
 `uninstall` removes exactly Reprieve's block from `bindings.lua`, so `Super+W`
 returns to Omarchy's stock close.
 
-## Project history
-
-Reprieve is maintained by Greyforge Labs. It began as a fork of
-[GreyforgeLabs/omarchy-desktop-undo](https://github.com/GreyforgeLabs/omarchy-desktop-undo)
-("Tile Park and Undo"), whose live-window parking approach it keeps. The
-recovery journal, reconciliation, safe reset, exact-state restore,
-address-scoped event tracking, conflict-aware bindings, migration, setup UI,
-doctor, and the test suite are Greyforge work. Details and the fork point are
-in [ORIGINS.md](ORIGINS.md); changes in [CHANGELOG.md](CHANGELOG.md).
-
 ## License
 
-MIT. Copyright (c) 2026 Greyforge Labs for the original implementation; copyright
-(c) 2026 Greyforge Labs for Reprieve's additions. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).

@@ -269,7 +269,7 @@ Item {
           width: parent.width
           wrapMode: Text.WordWrap
           text: root.legacy.length
-            ? "Existing Desktop Undo configuration detected. Migrating replaces its keybinding block with Reprieve's."
+            ? "An older close-parking keybinding block was found. Migrating replaces it with Reprieve's."
             : (root.needsSetup ? "Protect Super+W from accidental closes?" : "Reprieve keybindings are installed.")
           color: root.foreground
           font.family: root.fontFamily

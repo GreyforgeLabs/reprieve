@@ -6,7 +6,7 @@ All notable changes to Reprieve. Versions follow SemVer.
 
 ## [1.0.0] — 2026-09-11
 
-First qualified Greyforge release. See ORIGINS.md for the imported baseline.
+First release.
 
 ### Added
 - Persistent, session-bound recovery journal with atomic writes, quarantine of
@@ -20,7 +20,7 @@ First qualified Greyforge release. See ORIGINS.md for the imported baseline.
 - Address-scoped expected-event tracking for Reprieve's own moves and closes.
 - Conflict-aware keybinding install with live-bind inspection, alternate
   combinations, explicit replace, atomic backup+rename writes, exact removal,
-  and migration of `io.github.greyforgelabs.desktop-undo` / `io.github.chris.desktop-undo` blocks.
+  and migration of legacy `desktop-undo` marker blocks.
 - First-run setup card with delayed keyboard arming; timeline Restore All,
   two-step permanent close, recovery notice.
 - `reprieve` CLI, `reprieve doctor`, `~/.local/bin/reprieve` link on setup.
@@ -37,7 +37,3 @@ First qualified Greyforge release. See ORIGINS.md for the imported baseline.
 - Restored windows no longer flip floating state: Hyprland's `window.float`
   treats `action = "set"`/`"unset"` as toggle; Reprieve uses `enable`/`disable`.
 - Journal-free reloads no longer lose parked windows.
-
-## Imported baseline
-
-- `GreyforgeLabs/omarchy-desktop-undo` 1.2.3 at `15e4dac` (MIT).

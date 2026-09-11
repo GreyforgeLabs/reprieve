@@ -27,7 +27,7 @@ end
 LEGACY_BLOCK = """-- BEGIN io.github.greyforgelabs.desktop-undo
 hl.unbind("SUPER + W")
 hl.unbind("SUPER + Z")
-o.bind("SUPER + W", "Close window (undoable)", [=[/home/x/.config/omarchy/plugins/io.github.greyforgelabs.desktop-undo/bin/desktop-undo close]=])
+o.bind("SUPER + W", "Close window (undoable)", [=[/home/x/.config/omarchy/plugins/io.github.greyforgelabs.desktop-undo/bin/legacy close]=])
 o.bind("SUPER + Z", "Desktop undo", hl.dsp.global("io.github.greyforgelabs.desktop-undo:undo"))
 hl.window_rule({ match = { workspace = "special:desktop-undo" }, no_anim = true })
 -- END io.github.greyforgelabs.desktop-undo
@@ -216,7 +216,7 @@ class BindTests(unittest.TestCase):
 
     # --- migration ---------------------------------------------------------
 
-    def test_doug_marker_migration(self):
+    def test_legacy_marker_migration(self):
         self.config.write_text(USER_CONFIG + "\n" + LEGACY_BLOCK)
         rc, status = run("status", config=self.config, home=self.home)
         self.assertEqual(status["legacy"], ["io.github.greyforgelabs.desktop-undo"])
