@@ -32,8 +32,7 @@
 | 16 | Simulated damaged recovery state | PASS | script: corrupt JSON quarantined to `state.json.json.<ts>`, stranded windows exposed as Recovered and restorable |
 | 17 | `reset` with parked windows | PASS | script: every parked window restored, nothing tracked afterwards; `clear` refused while parked |
 | 18 | Conflicting existing keybind | PASS | offline tests (occupied `Super+Z` skipped / alternate / replace; custom `Super+W` refused without `--replace park`); live: `status` reports conflicts from `hyprctl -j binds` |
-| 19 | Migration from a legacy desktop-undo block | PASS | manual: legacy block re-added and live, `installBinds` from the setup card removed it, wrote Reprieve's block, reloaded, verified live; `omarchy plugin disable io.github.greyforgelabs.desktop-undo` |
-| 20 | Uninstall | PASS | manual: `reprieve uninstall` + `omarchy plugin remove` → block gone, `~/.local/bin/reprieve` gone, stock `Super+W = Close window` live again |
+| 19 | Uninstall | PASS | manual: `reprieve uninstall` + `omarchy plugin remove` → block gone, `~/.local/bin/reprieve` gone, stock `Super+W = Close window` live again |
 | S | Window moved to `special:reprieve` by hand | PASS | script: adopted as Recovered |
 | P | Parked process dies | PASS | script (foot → entry removed); manual (chromium → converted to Reopen) |
 | F | First-run setup | PASS | manual: card auto-opens after `plugin add --enable`; keyboard consent disarmed for 2.5 s; button path installs, `reprieve doctor` PASS |

@@ -64,7 +64,6 @@ BarWidget {
 
   function onSummaryPressed(button) {
     if (attention && service && !service.bindsInstalled) { service.openSetup(); return }
-    if (attention && service && service.legacyDetected) { service.openSetup(); return }
     if (button === Qt.RightButton && service) { service.undoLast(); return }
     if (button === Qt.MiddleButton && service) { service.restoreAll(); return }
     root.openTimeline()

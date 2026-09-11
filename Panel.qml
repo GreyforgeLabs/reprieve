@@ -65,7 +65,6 @@ Item {
   readonly property int parkedCount: service ? Number(service.parkedCount || 0) : 0
   readonly property bool needsSetup: !!service && service.bindsStatus !== null && !service.bindsInstalled
   readonly property var conflicts: (service && service.bindsStatus && service.bindsStatus.conflicts) ? service.bindsStatus.conflicts : []
-  readonly property var legacy: (service && service.bindsStatus && service.bindsStatus.legacy) ? service.bindsStatus.legacy : []
   readonly property var installResult: service ? service.lastInstallResult : null
 
   function open(payloadJson) {
@@ -268,9 +267,7 @@ Item {
         Text {
           width: parent.width
           wrapMode: Text.WordWrap
-          text: root.legacy.length
-            ? "An older close-parking keybinding block was found. Migrating replaces it with Reprieve's."
-            : (root.needsSetup ? "Protect Super+W from accidental closes?" : "Reprieve keybindings are installed.")
+          text: root.needsSetup ? "Protect Super+W from accidental closes?" : "Reprieve keybindings are installed."
           color: root.foreground
           font.family: root.fontFamily
           font.pixelSize: Style.font.body
@@ -326,7 +323,7 @@ Item {
           Text {
             anchors.centerIn: parent
             text: root.setupMessage ? root.setupMessage
-              : (root.legacy.length ? "Migrate to Reprieve" : (root.needsSetup ? "Enable Protection" : "Reinstall keybindings"))
+              : (root.needsSetup ? "Enable Protection" : "Reinstall keybindings")
             textFormat: Text.PlainText
             color: root.armed ? root.selectedText : root.muted
             font.family: root.fontFamily

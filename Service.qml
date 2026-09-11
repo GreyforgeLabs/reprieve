@@ -86,16 +86,14 @@ Item {
   property string mediaJobAddress: ""
 
   readonly property bool bindsInstalled: !!(bindsStatus && bindsStatus.installed)
-  readonly property bool legacyDetected: !!(bindsStatus && bindsStatus.legacy && bindsStatus.legacy.length)
   readonly property bool bindsLive: !!(bindsStatus && bindsStatus.live && bindsStatus.live.park)
   // Something the bar should point at: setup not done, bindings written but
-  // not loaded, a legacy block still present, or windows hidden without an
+  // not loaded, or windows hidden without an
   // entry. Empty string means all is well.
   readonly property string attentionReason: {
     if (strandedCount > 0) return strandedCount + " hidden window" + (strandedCount === 1 ? "" : "s") + " without a timeline entry — open the timeline to recover"
     if (!bindsStatus) return ""
     if (!bindsInstalled) return setupDismissed ? "" : "Reprieve is not set up — click to protect Super+W"
-    if (legacyDetected) return "An older close-parking block is still in bindings.lua — click to migrate"
     if (bindsStatus.hyprland && !bindsLive) return "Bindings are installed but not loaded — run: hyprctl reload"
     return ""
   }

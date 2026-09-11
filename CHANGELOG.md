@@ -4,14 +4,19 @@ All notable changes to Reprieve. Versions follow SemVer.
 
 ## [Unreleased]
 
+### Removed
+- `reprieve migrate` and the setup card's migration path for marker blocks
+  written by earlier close-parking plugins. Reprieve now manages only its own
+  `tech.greyforge.reprieve` block.
+
 ## [1.1.0] — 2026-09-11
 
 ### Added
 - Bar widget (`kinds: bar-widget`, placed in the right section on install):
   glyph with `+N` overflow, per-window app icons that restore on click
-  (right-click restores here), alert color + tooltip when setup, a legacy
-  block, unloaded bindings, or a stranded window needs attention; pulses on
-  park; hides when idle.
+  (right-click restores here), alert color + tooltip when setup, unloaded
+  bindings, or a stranded window needs attention; pulses on park; hides when
+  idle.
 - Settings `showInBar`, `barTray`, `barMaxIcons`, `hideBarWhenIdle`; `reprieve
   set KEY VALUE`; `reprieve bar status|install|show|tray|hide-idle|icons`.
 - `strandedCount`, `attention`, `restoreAddress` and `windowParked` on the
@@ -36,8 +41,8 @@ First release.
 - Conversion of a dead parked window into a **Reopen** entry when allowlisted.
 - Address-scoped expected-event tracking for Reprieve's own moves and closes.
 - Conflict-aware keybinding install with live-bind inspection, alternate
-  combinations, explicit replace, atomic backup+rename writes, exact removal,
-  and migration of legacy `desktop-undo` marker blocks.
+  combinations, explicit replace, atomic backup+rename writes, and exact
+  removal.
 - First-run setup card with delayed keyboard arming; timeline Restore All,
   two-step permanent close, recovery notice.
 - `reprieve` CLI, `reprieve doctor`, `~/.local/bin/reprieve` link on setup.

@@ -127,8 +127,8 @@ Super+W is minimize, so the bar shows where the window went. Reprieve's bar
 widget (placed automatically on install) has three parts:
 
 - a glyph that turns to the theme's alert color while something needs you
-  (not set up yet, a legacy block still present, bindings not loaded, or a
-  hidden window with no timeline entry) — click it and it takes you there;
+  (not set up yet, bindings not loaded, or a hidden window with no timeline
+  entry) — click it and it takes you there;
 - one **app icon per parked window**, newest first: click restores that
   window where it was, right-click restores it to the current workspace;
 - a `+N` count when more windows are parked than icons shown.
@@ -191,7 +191,6 @@ reprieve restore-all   Bring every parked window back
 reprieve clear         Forget history — refuses while windows are parked
 reprieve reset         Restore every parked window, then forget history
 reprieve setup         Open the setup card (installs bindings after consent)
-reprieve migrate       Same card, for legacy desktop-undo installs
 reprieve install-binds Non-interactive install (--undo/--redo/--timeline KEY,
                        --skip a,b, --replace a,b)
 reprieve remove-binds  Remove Reprieve's marked block, nothing else
@@ -243,20 +242,6 @@ the widget is placed, otherwise in `plugins[]`) — or with `reprieve set KEY VA
 ```
 
 The overlay follows the current Omarchy theme; there are no color settings.
-
-## Migrating from an earlier close-parking plugin
-
-If `bindings.lua` still carries a legacy `desktop-undo` marker block, the setup
-card reads **Migrate to Reprieve**. Migration backs up the file, removes only
-the recognised legacy block(s), writes Reprieve's block atomically, reloads
-Hyprland and verifies. Then disable the old plugin so two parkers never share
-`Super+W`:
-
-```sh
-omarchy plugin disable io.github.greyforgelabs.desktop-undo
-```
-
-`reprieve doctor` reports a still-enabled legacy plugin.
 
 ## Security and privacy
 

@@ -100,9 +100,6 @@ def main() -> int:
         else:
             rows.append(("Bindings", "not installed", False))
             problems.append("keybindings not installed; run: reprieve setup")
-        if binds.get("legacy"):
-            rows.append(("Legacy config", ", ".join(binds["legacy"]), False))
-            problems.append("legacy desktop-undo bindings present; run: reprieve migrate")
         if binds.get("malformed"):
             rows.append(("Marker blocks", "malformed: " + ", ".join(binds["malformed"]), False))
             problems.append("bindings.lua has an unbalanced marker block; inspect it by hand")
@@ -113,14 +110,6 @@ def main() -> int:
             problems.append("some shortcuts are occupied by other bindings (see reprieve setup)")
         else:
             rows.append(("Conflicts", "none", True))
-
-    # Legacy plugin still enabled?
-    rc, out = run(["omarchy-plugin-list"], timeout=3.0)
-    if rc == 0:
-        for line in out.splitlines():
-            if line.startswith("io.github.greyforgelabs.desktop-undo") and " enabled " in line:
-                rows.append(("Legacy plugin", "desktop-undo still enabled", False))
-                problems.append("disable the old plugin: omarchy plugin disable io.github.greyforgelabs.desktop-undo")
 
     # Bar widget (informational: a missing placement never fails the check)
     if plugin_ok:

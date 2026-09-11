@@ -45,7 +45,6 @@ Usage: reprieve <command>
   clear         Forget history (refuses while windows are parked)
   reset         Restore every parked window, then forget history
   setup         Open first-run setup (installs keybindings after consent)
-  migrate       Replace a legacy close-parking keybinding block with Reprieve
   install-binds Install keybindings non-interactively (see --help)
   remove-binds  Remove Reprieve's keybinding block
   uninstall     Restore parked windows and remove keybindings
@@ -143,7 +142,7 @@ case "$ACTION" in
       exit 1
     fi
     ;;
-  setup|migrate)
+  setup)
     if ! omarchy-shell shell summon "$PLUGIN_ID" '{"view":"setup"}' >/dev/null 2>&1; then
       echo "reprieve: shell is not running; installing bindings directly" >&2
       exec python3 "$HERE/reprieve-binds" install "$@"

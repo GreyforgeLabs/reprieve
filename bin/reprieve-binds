@@ -14,8 +14,7 @@ Reprieve owns exactly one marked block:
 
 Everything else in bindings.lua is the user's and is never touched. Writes
 are atomic (backup, same-directory temp file, rename) and symlinks or
-non-regular files are refused. Legacy desktop-undo marker blocks are
-recognised and removed only as part of an explicit install/migrate.
+non-regular files are refused.
 
 Conflict policy: Super+W is the product and replaces the stock Omarchy close
 binding when the user runs install (that is the consent). A custom Super+W,
@@ -38,14 +37,6 @@ import time
 PLUGIN_ID = "tech.greyforge.reprieve"
 BEGIN = f"-- BEGIN {PLUGIN_ID}"
 END = f"-- END {PLUGIN_ID}"
-LEGACY_IDS = ["io.github.greyforgelabs.desktop-undo", "io.github.chris.desktop-undo"]
-LEGACY_DESCRIPTIONS = {
-    "Close window (undoable)",
-    "Close window permanently",
-    "Desktop undo",
-    "Desktop redo",
-    "Desktop undo timeline",
-}
 STOCK_CLOSE_DESCRIPTION = "Close window"
 
 DESCRIPTIONS = {
@@ -232,10 +223,8 @@ def strip_blocks(text: str, plugin_id: str) -> tuple[str, int]:
 
 
 def text_outside_blocks(text: str) -> str:
-    """The user's own configuration, with every recognised managed block removed."""
-    out = text
-    for pid in [PLUGIN_ID] + LEGACY_IDS:
-        out, _ = strip_blocks(out, pid)
+    """The user's own configuration, with Reprieve's managed block removed."""
+    out, _ = strip_blocks(text, PLUGIN_ID)
     return out
 
 
@@ -351,7 +340,6 @@ def status(path: str) -> dict:
     out = {
         "config": path,
         "installed": False,
-        "legacy": [],
         "malformed": [],
         "file": "ok",
         "live": {},
@@ -364,11 +352,6 @@ def status(path: str) -> dict:
         out["file"] = str(exc)
         text = ""
     out["installed"] = bool(find_blocks(text, PLUGIN_ID))
-    for pid in LEGACY_IDS:
-        if find_blocks(text, pid):
-            out["legacy"].append(pid)
-        elif pid in text:
-            out["malformed"].append(pid)
     if has_dangling_marker(text, PLUGIN_ID):
         out["malformed"].append(PLUGIN_ID)
     binds = live_binds()
@@ -381,7 +364,7 @@ def status(path: str) -> dict:
             owner = textual_owner(user_text, key)
         if owner is None:
             continue
-        if owner in DESCRIPTIONS.values() or owner in LEGACY_DESCRIPTIONS:
+        if owner in DESCRIPTIONS.values():
             continue
         if action == "park" and owner == STOCK_CLOSE_DESCRIPTION:
             continue
@@ -402,16 +385,11 @@ def status(path: str) -> dict:
 
 def install(path: str, overrides: dict[str, str], skip: set[str], replace: set[str], reload: bool) -> dict:
     result = {"status": "ok", "installed": False, "keys": {}, "skipped": [], "conflicts": [],
-              "migrated": [], "backup": None, "reloaded": False, "verified": {}, "unbound": []}
+              "backup": None, "reloaded": False, "verified": {}, "unbound": []}
     text = read_config(path)
     if has_dangling_marker(text, PLUGIN_ID):
         raise BindError("bindings.lua has an unbalanced Reprieve marker block; repair it by hand first")
 
-    # Explicit migration: drop recognised legacy blocks, nothing else.
-    for pid in LEGACY_IDS:
-        text, n = strip_blocks(text, pid)
-        if n:
-            result["migrated"].append(pid)
     text, _ = strip_blocks(text, PLUGIN_ID)
     user_text = text_outside_blocks(text)
 
@@ -427,7 +405,7 @@ def install(path: str, overrides: dict[str, str], skip: set[str], replace: set[s
         owner = live_owner(binds, key)
         if owner is None:
             owner = textual_owner(user_text, key)
-        ours = owner in DESCRIPTIONS.values() or owner in LEGACY_DESCRIPTIONS
+        ours = owner in DESCRIPTIONS.values()
         if owner is None or ours:
             if ours or (action == "park"):
                 unbind.append(key)
@@ -537,8 +515,6 @@ def print_status_human(s: dict) -> None:
     print(f"Config     {s['config']}")
     print(f"File       {s['file']}")
     print(f"Installed  {'yes' if s['installed'] else 'no'}")
-    if s["legacy"]:
-        print(f"Legacy     {', '.join(s['legacy'])}")
     if s["malformed"]:
         print(f"Malformed  {', '.join(s['malformed'])}")
     if s.get("hyprland"):
@@ -551,7 +527,7 @@ def print_status_human(s: dict) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(prog="reprieve-binds")
-    parser.add_argument("action", choices=["status", "install", "migrate", "remove"])
+    parser.add_argument("action", choices=["status", "install", "remove"])
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--config", default=config_path())
     parser.add_argument("--undo")
@@ -571,7 +547,7 @@ def main() -> int:
             else:
                 print_status_human(out)
             return 0
-        if args.action in ("install", "migrate"):
+        if args.action == "install":
             overrides = {k: v for k, v in {"undo": args.undo, "redo": args.redo,
                                             "timeline": args.timeline, "close": args.close}.items() if v}
             skip = {s.strip() for s in args.skip.split(",") if s.strip()}

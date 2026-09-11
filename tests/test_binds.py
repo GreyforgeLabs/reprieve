@@ -24,20 +24,6 @@ if os.getenv("HOME") then
 end
 """
 
-LEGACY_BLOCK = """-- BEGIN io.github.greyforgelabs.desktop-undo
-hl.unbind("SUPER + W")
-hl.unbind("SUPER + Z")
-o.bind("SUPER + W", "Close window (undoable)", [=[/home/x/.config/omarchy/plugins/io.github.greyforgelabs.desktop-undo/bin/legacy close]=])
-o.bind("SUPER + Z", "Desktop undo", hl.dsp.global("io.github.greyforgelabs.desktop-undo:undo"))
-hl.window_rule({ match = { workspace = "special:desktop-undo" }, no_anim = true })
--- END io.github.greyforgelabs.desktop-undo
-"""
-
-CHRIS_BLOCK = """-- BEGIN io.github.chris.desktop-undo
-o.bind("SUPER + Z", "Chris undo", "chris-undo")
--- END io.github.chris.desktop-undo
-"""
-
 
 def run(*args, config, home):
     env = {k: v for k, v in os.environ.items() if k != "HYPRLAND_INSTANCE_SIGNATURE"}
@@ -214,34 +200,6 @@ class BindTests(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("both", out["error"])
 
-    # --- migration ---------------------------------------------------------
-
-    def test_legacy_marker_migration(self):
-        self.config.write_text(USER_CONFIG + "\n" + LEGACY_BLOCK)
-        rc, status = run("status", config=self.config, home=self.home)
-        self.assertEqual(status["legacy"], ["io.github.greyforgelabs.desktop-undo"])
-        self.assertFalse(status["installed"])
-        self.assertEqual(status["conflicts"], [])  # legacy binds are not conflicts
-        rc, out = run("migrate", config=self.config, home=self.home)
-        self.assertEqual(rc, 0, out)
-        self.assertEqual(out["migrated"], ["io.github.greyforgelabs.desktop-undo"])
-        text = self.config.read_text()
-        self.assertNotIn("greyforgelabs", text)
-        self.assertNotIn("special:desktop-undo", text)
-        self.assertEqual(text.count(BEGIN), 1)
-        self.assertTrue(text.startswith(USER_CONFIG.rstrip("\n")))
-        self.assertEqual(len(self.backups()), 1)
-        self.assertIn("greyforgelabs", self.backups()[0].read_text())
-
-    def test_chris_marker_cleanup(self):
-        self.config.write_text(CHRIS_BLOCK + USER_CONFIG)
-        rc, out = run("install", config=self.config, home=self.home)
-        self.assertEqual(rc, 0, out)
-        self.assertEqual(out["migrated"], ["io.github.chris.desktop-undo"])
-        text = self.config.read_text()
-        self.assertNotIn("chris", text)
-        self.assertIn(USER_CONFIG.rstrip("\n"), text)
-
     def test_malformed_marker_block_is_refused(self):
         broken = USER_CONFIG + f"\n{BEGIN}\no.bind(\"SUPER + W\", \"x\", \"y\")\n"  # no END
         self.config.write_text(broken)
@@ -254,15 +212,6 @@ class BindTests(unittest.TestCase):
         rc, out = run("remove", config=self.config, home=self.home)
         self.assertEqual(rc, 1)
         self.assertEqual(self.config.read_text(), broken)
-
-    def test_legacy_text_without_markers_is_reported_not_touched(self):
-        weird = USER_CONFIG + '-- io.github.greyforgelabs.desktop-undo was here\no.bind("SUPER + Z", "Desktop undo", "x")\n'
-        self.config.write_text(weird)
-        rc, status = run("status", config=self.config, home=self.home)
-        self.assertIn("io.github.greyforgelabs.desktop-undo", status["malformed"])
-        rc, out = run("install", config=self.config, home=self.home)
-        self.assertEqual(rc, 0, out)
-        self.assertIn("-- io.github.greyforgelabs.desktop-undo was here", self.config.read_text())
 
     # --- removal -----------------------------------------------------------
 
@@ -280,15 +229,8 @@ class BindTests(unittest.TestCase):
         rc, out = run("remove", config=self.home / "nope.lua", home=self.home)
         self.assertEqual(rc, 0)
 
-    def test_remove_leaves_legacy_and_user_config_alone(self):
-        self.config.write_text(USER_CONFIG + "\n" + LEGACY_BLOCK)
-        rc, out = run("remove", config=self.config, home=self.home)
-        self.assertEqual(rc, 0)
-        self.assertEqual(out["removed"], 0)
-        self.assertEqual(self.config.read_text(), USER_CONFIG + "\n" + LEGACY_BLOCK)
-
     def test_no_unrelated_config_loss_through_full_cycle(self):
-        original = USER_CONFIG + "\n" + LEGACY_BLOCK + "\n-- trailing comment\n"
+        original = USER_CONFIG + "\n-- trailing comment\n"
         self.config.write_text(original)
         run("install", config=self.config, home=self.home)
         run("install", "--redo", "SUPER + ALT + Y", config=self.config, home=self.home)
@@ -297,7 +239,6 @@ class BindTests(unittest.TestCase):
         self.assertIn(USER_CONFIG.rstrip("\n"), final)
         self.assertIn("-- trailing comment", final)
         self.assertNotIn(BEGIN, final)
-        self.assertNotIn("greyforgelabs", final)  # migrated away on install, by design
 
     def test_user_config_is_byte_identical_after_install_and_remove(self):
         for original in (USER_CONFIG, USER_CONFIG + "\n\n\n", "-- one\n\n\n\n-- two\n", "no trailing newline"):
