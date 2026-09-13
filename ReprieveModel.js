@@ -184,9 +184,9 @@ function relaunchAction(snapshot, sequence) {
   }
 }
 
-// Media restoration payload: PipeWire sink-input indices (pid-matched on
-// resume) plus MPRIS bus names we observed Playing. Bounded and re-typed so a
-// journal cannot smuggle anything else through.
+// Media restoration payload: MPRIS players successfully paused, plus legacy
+// PipeWire mute records (pid-matched on resume) for upgrade cleanup. Bounded
+// and re-typed so a journal cannot smuggle anything else through.
 function sanitizeMedia(media) {
   if (!media || typeof media !== "object") return null
   var muted = []

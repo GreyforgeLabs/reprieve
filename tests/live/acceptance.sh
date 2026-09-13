@@ -15,6 +15,7 @@ PARK="special:reprieve"
 STATE="${XDG_STATE_HOME:-$HOME/.local/state}/reprieve/state.json"
 QUICK=0; [[ "${1:-}" == "--quick" ]] && QUICK=1
 pass=0; fail=0; results=()
+SILENCE=""
 
 ipc() { timeout 3 omarchy-shell "$R" "$@" 2>/dev/null; }
 clients() { hyprctl -j clients; }
@@ -46,14 +47,24 @@ check() {  # check <name> <condition...>
   else fail=$((fail+1)); results+=("FAIL  $name"); echo "FAIL  $name"; fi
 }
 eq() { [[ "$1" == "$2" ]]; }
+wait_status() {
+  for _ in $(seq 1 50); do
+    [[ "$(status_field "$1" 2>/dev/null)" == "$2" ]] && return 0
+    sleep 0.2
+  done
+  return 1
+}
 
 cleanup() {
-  ipc restoreAll >/dev/null
-  sleep 0.5
-  while read -r a; do [[ -n "$a" ]] && alive "$a" && disp "hl.dsp.window.close({ window = \"address:$a\" })"; done < "$MINE_FILE"
+  while read -r a; do
+    if [[ -n "$a" ]] && alive "$a"; then
+      ipc restoreAddress "$a" >/dev/null
+      disp "hl.dsp.window.close({ window = \"address:$a\" })"
+    fi
+  done < "$MINE_FILE"
   rm -f "$MINE_FILE"
-  pkill -f -- "client-name=reprieve-acceptance-" 2>/dev/null
-  rm -f "$SILENCE"
+  [[ -n "${CLIENT:-}" ]] && pkill -f -- "client-name=$CLIENT" 2>/dev/null
+  [[ -n "$SILENCE" ]] && rm -f "$SILENCE"
 }
 trap cleanup EXIT
 
@@ -62,6 +73,8 @@ echo "Omarchy $(cat /usr/share/omarchy/version 2>/dev/null) · $(hyprctl version
 echo
 
 [[ -n "$(ipc status)" ]] || { echo "plugin not running"; exit 1; }
+[[ "$(status_field parked)" == "0" ]] || { echo "Refusing: user windows are parked"; exit 1; }
+clients | python3 -c 'import json,sys; sys.exit(any(c["workspace"]["name"] == "special:reprieve" for c in json.load(sys.stdin)))' || { echo "Refusing: hidden workspace is occupied"; exit 1; }
 home_ws=$(current_ws)
 ipc restoreAll >/dev/null; ipc clear >/dev/null
 
@@ -70,8 +83,9 @@ A=$(spawn)
 ipc parkWindow "$A" >/dev/null; sleep 0.4
 check "1 park moves window to $PARK"            eq "$(ws_of "$A")" "$PARK"
 check "1 journal holds the entry"               grep -q "\"address\":\"$A\"" "$STATE"
-check "1 undo restores to original workspace"   eq "$(ipc undo >/dev/null; sleep 0.5; ws_of "$A")" "$home_ws"
-check "1 restored window is focused"            eq "$(hyprctl -j activewindow | python3 -c 'import json,sys; print(json.load(sys.stdin)["address"])')" "$A"
+check "1 restored window is focused" python3 "$(dirname "$0")/restore_focus.py" "$A"
+sleep 0.5
+check "1 undo restores to original workspace"   eq "$(ws_of "$A")" "$home_ws"
 
 # 3/4/5/6. multiple windows, out-of-order undo, redo
 B=$(spawn); C=$(spawn)
@@ -125,15 +139,15 @@ sink=$(pactl list sink-inputs | grep -B30 "application.name = \"$CLIENT\"" | gre
 mute_of() { pactl list sink-inputs | awk -v s="Sink Input #$1" '$0==s{f=1} f&&/Mute:/{print $2; exit}'; }
 if [[ -n "$sink" ]]; then
   ipc parkWindow "$M" >/dev/null; sleep 1.5
-  check "10 parking mutes the window's stream"    eq "$(mute_of "$sink")" "yes"
-  check "10 media record journaled"               grep -q "\"muted\":\[{\"index\":$sink" "$STATE"
+  check "10 parking preserves the stream's mute" eq "$(mute_of "$sink")" "no"
+  check "10 no mixer mute is journaled" python3 -c 'import json,sys; e=next(e for e in json.load(open(sys.argv[1]))["entries"] if e["address"]==sys.argv[2]); sys.exit(bool((e.get("media") or {}).get("muted")))' "$STATE" "$M"
   ipc undo >/dev/null; sleep 1.5
-  check "10 restore unmutes it"                   eq "$(mute_of "$sink")" "no"
+  check "10 restore preserves the stream's mute" eq "$(mute_of "$sink")" "no"
 else
   echo "SKIP  10 media (no PipeWire sink input appeared)"
 fi
 
-# 11. permanent close from the timeline (of a window with muted audio)
+# 11. permanent close from the timeline (of a window with active audio)
 ipc parkWindow "$M" >/dev/null; sleep 1.5
 ipc closeParked "$M" >/dev/null; sleep 1.0
 check "11 permanent close destroys the window"  eq "$(ws_of "$M")" ""
@@ -147,18 +161,24 @@ pkill -f -- "client-name=$CLIENT" 2>/dev/null; sleep 0.5
 if [[ $QUICK -eq 0 ]]; then
   ipc parkWindow "$A" >/dev/null; sleep 0.2; ipc parkWindow "$B" >/dev/null; sleep 0.6
   omarchy restart shell >/dev/null 2>&1; sleep 5
-  check "14 shell restart keeps both parked entries"   eq "$(status_field parked)" "2"
+  check "14 shell restart keeps both parked entries"   wait_status parked 2
   check "14 order preserved (newest is B)"             eq "$(status_field addresses | python3 -c 'import sys,ast; print(ast.literal_eval(sys.stdin.read())[-1])')" "$B"
   ipc undo >/dev/null; sleep 0.5
   check "14 undo after restart restores B to its workspace" eq "$(ws_of "$B")" "$home_ws"
 
+  # Wait for the preceding restore's debounced journal write before replacing
+  # the file, otherwise the test corruption can be overwritten before restart.
+  wait_status parked 1
+  sleep 1.5
+  quarantine_before=$(python3 -c 'import glob,json,sys; print(json.dumps(glob.glob(sys.argv[1]+".*.*")))' "$STATE")
   echo '{"schema":1,"session":"nope","entries":[{"address":"0x1"}' > "$STATE"
   omarchy restart shell >/dev/null 2>&1; sleep 5
-  check "16 damaged journal is quarantined"      bash -c "ls '$(dirname "$STATE")'/state.json.*.* >/dev/null 2>&1"
+  wait_status recovered 1
+  check "16 damaged journal is quarantined" python3 -c 'import glob,json,sys; sys.exit(not (set(glob.glob(sys.argv[1]+".*.*"))-set(json.loads(sys.argv[2]))))' "$STATE" "$quarantine_before"
   check "16 stranded window recovered"            eq "$(status_field recovered)" "1"
   ipc undo >/dev/null; sleep 0.5
 check "16 recovered window restorable"          eq "$(ws_of "$A")" "$(current_ws)"
-  rm -f "$(dirname "$STATE")"/state.json.*.*
+  # Preserve quarantine files, including any user recovery records from before this run.
 else
   echo "SKIP  13/14/15/16 (quick mode)"
 fi

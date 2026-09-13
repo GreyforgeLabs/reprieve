@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Mute this window's PipeWire streams and pause matching MPRIS players.
+"""Pause matching MPRIS players without changing persistent mixer state.
 
-Stdlib + pactl + busctl. playerctl is not required. Chrome often shares one
-process across windows, so parking one Chrome window may mute all Chrome audio.
+Stdlib + busctl; pactl is used only to clean up older journals' mute records.
+Players without MPRIS pause support keep playing. Browsers can share one
+player across windows, so parking a window may pause playback in another.
 """
 from __future__ import annotations
 
@@ -129,11 +130,12 @@ def mpris_status(name: str) -> str:
     return text.replace("s ", "", 1).strip()
 
 
-def mpris_call(name: str, method: str) -> None:
-    run([
+def mpris_call(name: str, method: str) -> bool:
+    result = run([
         "busctl", "--user", "call", name,
         "/org/mpris/MediaPlayer2", "org.mpris.MediaPlayer2.Player", method,
     ])
+    return result.returncode == 0
 
 
 def class_tokens(klass: str) -> list[str]:
@@ -168,32 +170,30 @@ def player_matches(name: str, pids: set[int], klass: str) -> bool:
 def pause(pid: int, klass: str) -> dict:
     begin()
     pids = descendants(pid)
-    muted: list[dict] = []
-    listed = run(["pactl", "list", "sink-inputs"])
-    if listed.returncode == 0:
-        for sink in parse_sink_inputs(listed.stdout):
-            if sink["pid"] not in pids or sink["mute"]:
-                continue
-            setm = run(["pactl", "set-sink-input-mute", str(sink["index"]), "1"])
-            if setm.returncode == 0:
-                muted.append({"index": sink["index"], "pid": sink["pid"]})
+    # WirePlumber saves mute per application. A stream can disappear during
+    # Pause, browser idle, or process exit; restoring its old index cannot
+    # undo that saved mute. Never use persistent mixer controls for parking.
     paused: list[str] = []
     for name in mpris_names():
         if mpris_status(name) != "Playing":
             continue
         if not player_matches(name, pids, klass):
             continue
-        mpris_call(name, "Pause")
-        paused.append(name)
-    return {"muted": muted, "paused": paused}
+        if mpris_call(name, "Pause"):
+            paused.append(name)
+    return {"muted": [], "paused": paused}
 
 
 def resume(payload: dict) -> dict:
     begin()
     muted = payload.get("muted") or []
     paused = payload.get("paused") or []
-    listed = run(["pactl", "list", "sink-inputs"])
-    sinks = parse_sink_inputs(listed.stdout) if listed.returncode == 0 else []
+    # Compatibility with journals from releases that muted on park. Never
+    # guess a replacement by application name: its mute may be intentional.
+    sinks = []
+    if muted:
+        listed = run(["pactl", "list", "sink-inputs"])
+        sinks = parse_sink_inputs(listed.stdout) if listed.returncode == 0 else []
     by_index = {s["index"]: s for s in sinks}
     unmuted = 0
     for item in muted:
@@ -202,15 +202,15 @@ def resume(payload: dict) -> dict:
         sink = by_index.get(index)
         if not sink:
             continue
-        if pid and sink["pid"] and sink["pid"] != pid:
+        if not pid or sink["pid"] != pid:
             continue
-        run(["pactl", "set-sink-input-mute", str(index), "0"])
-        unmuted += 1
+        if run(["pactl", "set-sink-input-mute", str(index), "0"]).returncode == 0:
+            unmuted += 1
     played = 0
     for name in paused:
         if mpris_status(name) == "Paused":
-            mpris_call(name, "Play")
-            played += 1
+            if mpris_call(name, "Play"):
+                played += 1
     return {"unmuted": unmuted, "played": played}
 
 

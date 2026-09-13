@@ -140,7 +140,7 @@ cycle and carries your settings across.
 State lives in a small journal at `~/.local/state/reprieve/state.json`
 (directory `0700`, file `0600`). It records the minimum needed to find a
 hidden window again — address, home workspace, class, layout flags, pid,
-ordering — plus which PipeWire streams and MPRIS players to unpause. Titles,
+ordering — plus which MPRIS players to unpause (and legacy mixer cleanup records). Titles,
 command lines, and environment are never stored.
 
 Each journal is tied to one Hyprland session. On every start Reprieve
@@ -209,7 +209,7 @@ placed, otherwise under `plugins[]`).
 | Key                | Default | Effect                                                            |
 | ------------------ | ------- | ----------------------------------------------------------------- |
 | `maxStack`         | `10`    | How many windows may be hidden at once (1–20); the oldest is closed beyond that |
-| `pauseMediaOnPark` | `true`  | Silence the window's PipeWire streams and pause its MPRIS player while hidden |
+| `pauseMediaOnPark` | `true`  | Pause supported MPRIS players while hidden; audio without pause support keeps playing |
 | `trackAppClose`    | `true`  | Turn title-bar closes of relaunchable apps into Reopen rows        |
 | `showToast`        | `true`  | Corner notice on park and return (also **T** in the timeline)     |
 | `showInBar`        | `true`  | Show the bar widget                                               |
@@ -220,6 +220,19 @@ placed, otherwise under `plugins[]`).
 ```json
 { "id": "tech.greyforge.reprieve", "maxStack": 10, "pauseMediaOnPark": true, "barTray": true }
 ```
+
+Parking uses media-player pause controls; it does not change application mute
+or volume. Players without MPRIS pause support may keep playing while hidden.
+Browsers can share a player across windows, so pausing one window may also
+pause another window's playback.
+
+**Audio muted after using an older release?** Versions 1.0.0 and 1.1.0 muted
+application streams on park. If a stream disappeared or was replaced while
+parked, its saved mute could survive restore and browser restarts. Start
+playback and unmute the affected application in the Audio widget. Version 1.1.1 prevents new parking mutes. If you cannot update yet,
+`reprieve set pauseMediaOnPark false` prevents new parking mutes, but parked
+windows may keep playing. Updating or disabling this setting does not clear a
+mute that is already saved. See [the audio incident record](docs/AUDIO-MUTE.md).
 
 Colours follow the active Omarchy theme; there is nothing to configure there.
 

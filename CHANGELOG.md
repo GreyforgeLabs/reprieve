@@ -9,6 +9,20 @@ All notable changes to Reprieve. Versions follow SemVer.
   written by earlier close-parking plugins. Reprieve now manages only its own
   `tech.greyforge.reprieve` block.
 
+## [1.1.1] — 2026-09-13
+
+### Fixed
+- Parking no longer changes persistent application mute. A disappearing or
+  replaced stream could leave browser audio muted even after restore or an
+  application restart. Existing journal records still clean up matching live
+  streams; already-orphaned mutes require application-level unmute once.
+- Disabling media pausing no longer skips recorded cleanup before closing a
+  parked window. Failed media commands are no longer counted as successful.
+
+### Changed
+- Media pausing uses MPRIS only. Players without pause support can keep
+  playing while parked; mixer mute and volume remain under user control.
+
 ## [1.1.0] — 2026-09-11
 
 ### Added
