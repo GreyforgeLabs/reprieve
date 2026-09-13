@@ -17,7 +17,7 @@ import time
 import wave
 
 
-def serve_player(name):
+def serve_player(name, events=None):
     from gi.repository import Gio, GLib
     bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
     xml = '''<node><interface name="org.mpris.MediaPlayer2.Player">
@@ -28,6 +28,9 @@ def serve_player(name):
 
     def method(connection, sender, path, interface, name, parameters, invocation):
         status[0] = 'Paused' if name == 'Pause' else 'Playing'
+        if events:
+            with open(events, 'a') as log:
+                log.write(name + '\n')
         invocation.return_value(None)
 
     bus.register_object('/org/mpris/MediaPlayer2',
@@ -144,7 +147,7 @@ def main():
 
 
 if __name__ == '__main__':
-    if len(sys.argv) == 3 and sys.argv[1] == '--serve-player':
-        serve_player(sys.argv[2])
+    if len(sys.argv) in (3, 4) and sys.argv[1] == '--serve-player':
+        serve_player(sys.argv[2], sys.argv[3] if len(sys.argv) == 4 else None)
     else:
         main()

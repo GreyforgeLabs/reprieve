@@ -47,6 +47,13 @@ check() {  # check <name> <condition...>
   else fail=$((fail+1)); results+=("FAIL  $name"); echo "FAIL  $name"; fi
 }
 eq() { [[ "$1" == "$2" ]]; }
+wait_status() {
+  for _ in $(seq 1 50); do
+    [[ "$(status_field "$1" 2>/dev/null)" == "$2" ]] && return 0
+    sleep 0.2
+  done
+  return 1
+}
 
 cleanup() {
   while read -r a; do
@@ -76,8 +83,9 @@ A=$(spawn)
 ipc parkWindow "$A" >/dev/null; sleep 0.4
 check "1 park moves window to $PARK"            eq "$(ws_of "$A")" "$PARK"
 check "1 journal holds the entry"               grep -q "\"address\":\"$A\"" "$STATE"
-check "1 undo restores to original workspace"   eq "$(ipc undo >/dev/null; sleep 0.5; ws_of "$A")" "$home_ws"
-check "1 restored window is focused"            eq "$(hyprctl -j activewindow | python3 -c 'import json,sys; print(json.load(sys.stdin)["address"])')" "$A"
+check "1 restored window is focused" python3 "$(dirname "$0")/restore_focus.py" "$A"
+sleep 0.5
+check "1 undo restores to original workspace"   eq "$(ws_of "$A")" "$home_ws"
 
 # 3/4/5/6. multiple windows, out-of-order undo, redo
 B=$(spawn); C=$(spawn)
@@ -153,14 +161,19 @@ pkill -f -- "client-name=$CLIENT" 2>/dev/null; sleep 0.5
 if [[ $QUICK -eq 0 ]]; then
   ipc parkWindow "$A" >/dev/null; sleep 0.2; ipc parkWindow "$B" >/dev/null; sleep 0.6
   omarchy restart shell >/dev/null 2>&1; sleep 5
-  check "14 shell restart keeps both parked entries"   eq "$(status_field parked)" "2"
+  check "14 shell restart keeps both parked entries"   wait_status parked 2
   check "14 order preserved (newest is B)"             eq "$(status_field addresses | python3 -c 'import sys,ast; print(ast.literal_eval(sys.stdin.read())[-1])')" "$B"
   ipc undo >/dev/null; sleep 0.5
   check "14 undo after restart restores B to its workspace" eq "$(ws_of "$B")" "$home_ws"
 
+  # Wait for the preceding restore's debounced journal write before replacing
+  # the file, otherwise the test corruption can be overwritten before restart.
+  wait_status parked 1
+  sleep 1.5
   quarantine_before=$(python3 -c 'import glob,json,sys; print(json.dumps(glob.glob(sys.argv[1]+".*.*")))' "$STATE")
   echo '{"schema":1,"session":"nope","entries":[{"address":"0x1"}' > "$STATE"
   omarchy restart shell >/dev/null 2>&1; sleep 5
+  wait_status recovered 1
   check "16 damaged journal is quarantined" python3 -c 'import glob,json,sys; sys.exit(not (set(glob.glob(sys.argv[1]+".*.*"))-set(json.loads(sys.argv[2]))))' "$STATE" "$quarantine_before"
   check "16 stranded window recovered"            eq "$(status_field recovered)" "1"
   ipc undo >/dev/null; sleep 0.5

@@ -52,32 +52,29 @@ not retroactively repair orphaned mutes created by released versions. Existing
 MPRIS limitations remain: a browser can share one media player across windows,
 and pausing is best effort. The patch does not guarantee all parked audio is silent.
 
-## Validation and release gate
+## Validation
 
 The new offline regression tests failed against the old helper. After the fix,
-`tests/run.sh` passes: 25 model cases, 9 journal tests, 16 binding tests, and 8
+`tests/run.sh` passes on the 1.1.1 release branch: 25 model cases, 9 journal tests, 20 binding tests, and 8
 media tests, plus the script and plugin validation checks. Live helper checks
 are in `python3 tests/live/audio_streams.py`: uniquely named silent streams,
 stream replacement, saved mute, and a temporary MPRIS service for real
 Pause/Play calls. Both live checks passed on 2026-09-13. They never install the
 plugin or control real media players.
 
-The full window/shell acceptance matrix must still be run on the patched
-installed plugin before release. Its audio cases have been changed to expect
-preserved mixer state. Also qualify MPRIS park/restore, a player without
-pause support, shell reload while parked, and disabling pausing with a legacy
-mute record pending. This patch has not been installed into the running plugin
-or published. Do not reuse the 1.0.0 qualification result as proof for this change.
+The full acceptance script passed **35/35** against the installed 1.1.1
+candidate. `tests/live/media_parking.py` also passed real window park/restore
+with MPRIS, shell reload while paused, and disabling pausing with player and
+legacy mixer cleanup pending. See [the 1.1.1 qualification](QUALIFICATION-1.1.1.md).
+This is new qualification; the 1.0.0 record does not establish correctness of
+this change. Version 1.1.1 is based on v1.1.0 to exclude unrelated unreleased changes.
 
-Prioritize a focused bugfix release. Keep unrelated unreleased changes out of
-that release. Include the changed no-pause-support behavior and the one-time
-unmute instruction in its notes.
-
-## Draft user notice
+## User notice
 
 Reprieve 1.0.0 and 1.1.0 can leave application audio muted if an audio stream
-disappears or is replaced while its window is parked. Until a fix is installed,
-run `reprieve set pauseMediaOnPark false`; parked windows may then keep playing
-audio. If an application is already silent, start playback and unmute it in
-the Audio widget. Disabling parking's media handling prevents new mutes but
-does not clear an existing one.
+disappears or is replaced while its window is parked. Update to 1.1.1 to
+prevent new parking mutes. If an application is already silent, start playback
+and unmute it in the Audio widget once. Players without media pause support
+may keep playing while parked. If you cannot update yet, use
+`reprieve set pauseMediaOnPark false`; this prevents new mutes but does not
+clear an existing one.
