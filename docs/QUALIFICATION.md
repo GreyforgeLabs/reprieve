@@ -1,5 +1,11 @@
 # Reprieve 1.0.0 — live qualification record
 
+This is a historical record, not qualification of the current source. The
+2026-09-13 [audio incident](AUDIO-MUTE.md) confirmed a persistent mute bug on
+stream replacement that the original media cases did not cover. Current
+acceptance expectations preserve mixer mute; the complete matrix must be
+rerun before releasing that change.
+
 | | |
 | --- | --- |
 | Date | 2026-09-11 |

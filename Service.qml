@@ -581,7 +581,8 @@ Item {
   // Close a window Reprieve may have muted: unmute first, then close.
   function closeAfterMedia(address, media) {
     var clean = Model.sanitizeMedia(media)
-    if (!clean || !root.pauseMediaOnPark) { root.closeWindow(address); return }
+    // Disabling future pauses must not skip cleanup already owed to a window.
+    if (!clean) { root.closeWindow(address); return }
     root.requestResume(clean)
     root.mediaQueue = root.mediaQueue.concat([{ kind: "close", address: Model.normalizeAddress(address) }])
     root.pumpMedia()

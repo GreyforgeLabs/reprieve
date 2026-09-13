@@ -119,7 +119,7 @@ workspace you are on, **A** restores everything, **Y** redoes the last park,
 toggles the top-right toast, **Esc** closes.
 
 Restore puts the window back tiled or floating as it was, re-applies the exact
-fullscreen state it had, focuses it, and unmutes audio Reprieve paused.
+fullscreen state it had, focuses it, and resumes media Reprieve paused.
 
 ## Bar widget
 
@@ -161,7 +161,7 @@ Reprieve keeps a small recovery journal at
 `~/.local/state/reprieve/state.json` (directory `0700`, file `0600`). It holds
 only what is needed to find parked windows again: address, original
 workspace, class, floating/fullscreen flags, pid, order, and — when audio was
-paused — which PipeWire streams and MPRIS players to resume. No titles, no
+paused — which MPRIS players to resume, plus legacy mixer cleanup records. No titles, no
 command lines, no environment.
 
 The journal is bound to the current Hyprland session. On start Reprieve
@@ -230,7 +230,7 @@ the widget is placed, otherwise in `plugins[]`) — or with `reprieve set KEY VA
 | Key                | Default | What it does                                              |
 | ------------------ | ------- | --------------------------------------------------------- |
 | `maxStack`         | `10`    | Parked-window cap, 1–20. Overflow closes the oldest.      |
-| `pauseMediaOnPark` | `true`  | Mute that window's PipeWire streams / pause its MPRIS player; resume on restore. |
+| `pauseMediaOnPark` | `true`  | Pause supported MPRIS players while hidden; audio without pause support keeps playing. |
 | `trackAppClose`    | `true`  | Record title-bar closes of allowlisted apps as Reopen entries. |
 | `showToast`        | `true`  | Top-right park/restore toast. Also toggled with **T**.    |
 | `showInBar`        | `true`  | Show the bar widget at all.                               |
@@ -241,6 +241,16 @@ the widget is placed, otherwise in `plugins[]`) — or with `reprieve set KEY VA
 ```json
 { "id": "tech.greyforge.reprieve", "maxStack": 10, "pauseMediaOnPark": true, "barTray": true }
 ```
+
+Parking uses media-player pause controls without changing application mute or
+volume. Players without MPRIS pause support may keep playing while hidden.
+Browsers can share a player across windows, so pausing one window may also
+pause another window's playback.
+
+Versions 1.0.0 and 1.1.0 could leave a saved application mute when a parked
+audio stream disappeared or was replaced. Version 1.1.1 prevents new parking
+mutes. For an existing mute, start playback and unmute the affected application
+in the Audio widget once. See [the audio incident record](docs/AUDIO-MUTE.md).
 
 The overlay follows the current Omarchy theme; there are no color settings.
 
@@ -283,9 +293,9 @@ See [SECURITY.md](SECURITY.md) for reporting.
   workspace, tracked or not.
 - **`reprieve clear` refuses** — that is deliberate: it will not forget live
   parked windows. Use `reprieve restore-all` or `reprieve reset`.
-- **Audio stayed muted** — the parked app's stream index changed while it was
-  hidden. Unmute in the Audio widget; Reprieve only ever unmutes streams whose
-  pid still matches.
+- **Audio stayed muted after an older release** — start playback and unmute
+  the application in the Audio widget once. Version 1.1.1 prevents new parking
+  mutes; it does not clear orphaned mutes that were already saved.
 - **Setup says a key is in use** — pick the alternate with `A`, replace with
   `R`, or install without it (Enter). `omarchy menu keybindings --print` shows
   who owns what.
