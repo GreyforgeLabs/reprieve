@@ -9,6 +9,13 @@ All notable changes to Reprieve. Versions follow SemVer.
   written by earlier close-parking plugins. Reprieve now manages only its own
   `tech.greyforge.reprieve` block.
 
+## [1.1.2] — 2026-09-14
+
+### Fixed
+- MPRIS player matching no longer pauses the wrong player. A PID substring
+  (e.g. pid 86 inside `instance5868`) could match an unrelated bus name;
+  PIDs must now match as whole numbers.
+
 ## [1.1.1] — 2026-09-13
 
 ### Fixed
