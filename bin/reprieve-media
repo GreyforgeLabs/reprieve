@@ -157,7 +157,15 @@ def class_tokens(klass: str) -> list[str]:
 def player_matches(name: str, pids: set[int], klass: str) -> bool:
     low = name.lower()
     for pid in pids:
-        if str(pid) and str(pid) in low:
+        try:
+            pid_int = int(pid)
+        except (TypeError, ValueError):
+            continue
+        if pid_int <= 0:
+            continue
+        # A PID must match as a whole number, not as a substring of a longer
+        # ID: pid 86 must not match "...instance5868".
+        if re.search(r"(?<!\d)%d(?!\d)" % pid_int, low):
             return True
     tokens = class_tokens(klass)
     short = low.split("org.mpris.mediaplayer2.", 1)[-1]

@@ -98,6 +98,10 @@ class MediaTests(unittest.TestCase):
         self.assertTrue(mod.player_matches("org.mpris.MediaPlayer2.chromium.instance5868", {5868}, "google-chrome"))
         self.assertTrue(mod.player_matches("org.mpris.MediaPlayer2.spotify", {1}, "Spotify"))
         self.assertFalse(mod.player_matches("org.mpris.MediaPlayer2.spotify", {1}, "com.mitchellh.ghostty"))
+        # A PID must match as a whole number, not as a substring of a longer ID.
+        self.assertFalse(mod.player_matches("org.mpris.MediaPlayer2.chromium.instance5868", {86}, "foot"))
+        self.assertFalse(mod.player_matches("org.mpris.MediaPlayer2.chromium.instance5868", {586}, "foot"))
+        self.assertFalse(mod.player_matches("org.mpris.MediaPlayer2.chromium.instance5868", {68}, "foot"))
 
     def test_run_respects_deadline(self):
         mod._deadline = 0
