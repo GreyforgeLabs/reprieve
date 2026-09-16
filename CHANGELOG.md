@@ -2,6 +2,35 @@
 
 All notable changes to Reprieve. Versions follow SemVer.
 
+## [1.3.0] – 2026-09-16
+
+### Changed
+- The overlay, the toast and the bar widget carry the Greyforge Labs
+  identity: the steel hexagon mark with cyan seams and a single amber core
+  (`brand/GreyforgeMark.qml`, drawn on a Canvas so it follows the theme's
+  foreground and background), a "GREYFORGE LABS" byline under the product
+  name, a signature wordmark at the foot of every card, and a blueprint
+  plate behind the timeline.
+- Timeline rows show the application icon on a steel plate, a
+  PARKED / RECOVERED / REOPEN chip, a cyan selection rail, and the timeout
+  countdown in amber. Keyboard hints are rendered as keycaps instead of a
+  run-on sentence.
+- Restore All is an amber primary button above a preferences strip:
+  Toasts (`T`), Pause audio on park (`M`), and the 1.2.0 park timeout as an
+  **Auto-close** stepper (`P` / click / wheel for the next preset, Shift+P /
+  right-click for the previous: Off, 15 s, 30 s, 1 min, 2 min). The strip
+  writes through the service, so `reprieve set …` and the overlay agree; a
+  CLI value off the preset list steps to the nearest preset. The
+  setup card lays the five keybindings out as a keycap table and explains
+  what parking means before asking for consent.
+- The bar widget's status glyph is now the Greyforge mark: the amber core
+  grows and the plate flares when a window is parked, the core takes the
+  theme's alert colour when attention is needed, and the overflow count
+  rides the corner as a badge. Tray icons sit on small cyan-edged plates
+  with an amber (parked) or cyan (recovered) marker.
+- The toast leads with the mark and an amber edge rail.
+- Screenshots in `docs/screenshots/`.
+
 ## [1.2.0] – 2026-09-16
 
 ### Added

@@ -29,13 +29,9 @@ omarchy plugin add https://github.com/GreyforgeLabs/reprieve.git --enable
 
 A compact card appears the first time Reprieve loads without its shortcuts:
 
-```text
-Reprieve
-
-Protect Super+W from accidental closes?
-
-[ Enable Protection ]
-```
+<p align="center">
+  <img src="docs/screenshots/setup.png" alt="The Reprieve setup card" width="640">
+</p>
 
 Press it, and from then on:
 
@@ -93,6 +89,10 @@ Two outcomes exist in the timeline, and Reprieve is careful to tell them apart:
 
 `Super+Shift+Z` shows everything Reprieve can bring back, most recent at the top.
 
+<p align="center">
+  <img src="docs/screenshots/timeline.png" alt="The Reprieve recovery timeline" width="640">
+</p>
+
 | Row type      | Meaning                                                                 |
 | ------------- | ----------------------------------------------------------------------- |
 | **Parked**    | A live window Reprieve put on the hidden workspace                      |
@@ -102,7 +102,10 @@ Two outcomes exist in the timeline, and Reprieve is careful to tell them apart:
 Inside the overlay: **Enter** returns the row to its original workspace,
 **Space** pulls it onto the one you are looking at, **A** returns everything,
 **Y** re-parks the last one, **Del** twice on the same row terminates it for
-good, **T** toggles the corner toast, **Esc** dismisses.
+good, **Esc** dismisses. The strip under Restore All holds the preferences:
+**T** toggles the corner toast, **M** toggles pausing audio on park, and
+**P** steps the auto-close timeout through Off, 15 s, 30 s, 1 min and 2 min
+(Shift+P or right-click steps back; the CLI accepts any value in 5–120 s).
 
 ## The bar widget
 
@@ -110,10 +113,15 @@ Because `Super+W` now hides rather than destroys, the bar tells you where
 things went. Reprieve's widget is placed in the right section on install and
 has three parts:
 
-- a status glyph that switches to your theme's alert colour whenever
-  attention is needed — setup incomplete, shortcuts written but not loaded,
-  or a hidden window with no timeline entry — and jumps you to the fix when
-  clicked;
+<p align="center">
+  <img src="docs/screenshots/bar-and-toast.png" alt="The Reprieve bar widget and toast" width="420">
+</p>
+
+- the Greyforge mark as a status glyph: its amber core grows when windows
+  are parked, flares for a beat whenever one is parked, and switches to your
+  theme's alert colour whenever attention is needed — setup incomplete,
+  shortcuts written but not loaded, or a hidden window with no timeline
+  entry — jumping you to the fix when clicked;
 - one application icon per hidden window, newest first — left-click returns
   it home, right-click pulls it to the current workspace;
 - a `+N` overflow once more windows are hidden than icons shown.
@@ -222,7 +230,8 @@ placed, otherwise under `plugins[]`).
 { "id": "tech.greyforge.reprieve", "maxStack": 10, "pauseMediaOnPark": true, "barTray": true }
 ```
 
-Enable the timeout with `reprieve set parkTimeout 30` (seconds, `5`–`120`;
+Enable the timeout from the timeline's **Auto-close** control or with
+`reprieve set parkTimeout 30` (seconds, `5`–`120`;
 `0` disables it again; values outside the range are clamped and the
 effective value is reported). Restoring a window before its deadline cancels the
 timeout; the clock starts when the window is parked and survives shell
