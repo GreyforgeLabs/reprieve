@@ -25,6 +25,7 @@ alternate key is supplied.
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import os
 import re
@@ -185,7 +186,22 @@ def write_config_atomic(path: str, text: str) -> str | None:
         except OSError:
             pass
         raise
+    prune_backups(path)
     return backup
+
+
+def prune_backups(path: str, keep: int = 5) -> None:
+    """Every install/remove leaves a timestamped backup; keep only the recent
+    ones so ~/.config/hypr does not fill with them over time."""
+    try:
+        cands = sorted(glob.glob(path + ".bak.*"))
+    except OSError:
+        return
+    for old in cands[: max(0, len(cands) - keep)]:
+        try:
+            os.unlink(old)
+        except OSError:
+            pass
 
 
 def block_pattern(plugin_id: str) -> re.Pattern:
@@ -457,6 +473,7 @@ def install(path: str, overrides: dict[str, str], skip: set[str], replace: set[s
 def remove(path: str, reload: bool) -> dict:
     result = {"status": "ok", "removed": 0, "backup": None, "reloaded": False}
     if not os.path.lexists(path):
+        result["cli_link"] = remove_cli_link()
         return result
     text = read_config(path)
     new_text, n = strip_blocks(text, PLUGIN_ID)

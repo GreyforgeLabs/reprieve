@@ -65,7 +65,6 @@ test("label sanitization", () => {
   assert.ok(M.toastLabel({ title: "x".repeat(80) }).length <= 32)
   assert.strictEqual(M.sanitizeClass("goo gle\nchrome"), "googlechrome")
   assert.ok(M.sanitizeClass("c".repeat(500)).length <= 128)
-  assert.strictEqual(M.luaString('a"b\\c'), 'a\\"b\\\\c')
 })
 
 // ------------------------------------------------------------------ parking
@@ -180,6 +179,18 @@ test("arbitrary restore and restore here", () => {
   assert.strictEqual(u.effects[0].workspace, "2")
   assert.strictEqual(M.undoAt(s, 99, null).action, null)
   assert.strictEqual(M.undoAt(s, -1, null).action, null)
+})
+
+test("undoAt rejects NaN, fractional and infinite indexes without touching redo", () => {
+  let s = M.createState()
+  s = M.pushPark(s, snap({ address: "0x1", title: "One" })).state
+  for (const bad of [NaN, 1.5, Infinity, -Infinity, "x", undefined]) {
+    const r = M.undoAt(s, Number(bad), null)
+    assert.strictEqual(r.action, null)
+    assert.deepStrictEqual(r.effects, [])
+    assert.deepStrictEqual(r.state.redo, [])
+  }
+  assert.deepStrictEqual(M.parkedAddresses(s), ["0x1"])
 })
 
 test("redo overflow closes the oldest", () => {
@@ -332,7 +343,7 @@ test("journal round trip persists only recovery data", () => {
   assert.strictEqual(j.session, SESSION)
   assert.strictEqual(j.entries.length, 1)
   const e = j.entries[0]
-  assert.deepStrictEqual(Object.keys(e).sort(), ["address", "class", "floating", "fullscreen", "fullscreenClient", "media", "pid", "sequence", "workspace"])
+  assert.deepStrictEqual(Object.keys(e).sort(), ["address", "class", "floating", "fullscreen", "fullscreenClient", "media", "parkedAt", "pid", "sequence", "workspace"])
   assert.strictEqual(JSON.stringify(j).indexOf("Secret Title"), -1)
   assert.strictEqual(JSON.stringify(j).indexOf("argv"), -1)
   const p = M.parseJournal(JSON.stringify(j), SESSION)
@@ -468,6 +479,162 @@ test("pushRecovered adopts a stranded window without closing anything", () => {
   assert.strictEqual(M.pushRecovered(r.state, { address: "0x2", class: "foot" }).reason, "tracked")
   assert.strictEqual(M.pushRecovered(r.state, { address: "nope", class: "foot" }).reason, "invalid")
   assert.strictEqual(M.pushRecovered(r.state, { address: "0x3", class: "org.omarchy.lock" }).reason, "excluded")
+})
+
+// ------------------------------------------------------------- park timeout
+
+test("parkTimeout is off by default and clamps to 5-120", () => {
+  assert.strictEqual(M.DEFAULT_PARK_TIMEOUT, 0)
+  assert.strictEqual(M.MIN_PARK_TIMEOUT, 5)
+  assert.strictEqual(M.MAX_PARK_TIMEOUT, 120)
+  assert.strictEqual(M.createState().parkTimeout, 0)
+  assert.strictEqual(M.clampParkTimeout(undefined), 0)
+  assert.strictEqual(M.clampParkTimeout("off"), 0)
+  assert.strictEqual(M.clampParkTimeout(0), 0)
+  assert.strictEqual(M.clampParkTimeout(-30), 0)
+  assert.strictEqual(M.clampParkTimeout(1), 5)
+  assert.strictEqual(M.clampParkTimeout(4), 5)
+  assert.strictEqual(M.clampParkTimeout(5), 5)
+  assert.strictEqual(M.clampParkTimeout(30), 30)
+  assert.strictEqual(M.clampParkTimeout(120), 120)
+  assert.strictEqual(M.clampParkTimeout(500), 120)
+  assert.strictEqual(M.createState({ parkTimeout: 30 }).parkTimeout, 30)
+  assert.strictEqual(M.createState({ parkTimeout: 3 }).parkTimeout, 5)
+  // Survives clone and reset.
+  const cloned = M.cloneState(M.createState({ parkTimeout: 45 }))
+  assert.strictEqual(cloned.parkTimeout, 45)
+})
+
+test("pushPark stamps parkedAt and re-park refreshes it", () => {
+  const r = M.pushPark(M.createState(), snap(), 1000000)
+  assert.strictEqual(r.state.undo[0].parkedAt, 1000000)
+  const r2 = M.pushPark(r.state, snap(), 2000000)
+  assert.strictEqual(r2.state.undo.length, 1)
+  assert.strictEqual(r2.state.undo[0].parkedAt, 2000000)
+})
+
+test("expireParked only drops timed-out undo entries", () => {
+  let s = M.createState({ parkTimeout: 10 })
+  s = M.pushPark(s, snap({ address: "0x1" }), 1000000).state
+  s = M.pushPark(s, snap({ address: "0x2" }), 1005000).state
+  // Nothing expired yet (9s and 4s old).
+  let r = M.expireParked(s, 1009000, 10)
+  assert.deepStrictEqual(r.expired, [])
+  assert.strictEqual(r.state.undo.length, 2)
+  // At 11s the first entry expires; the second is only 6s old.
+  r = M.expireParked(s, 1011000, 10)
+  assert.deepStrictEqual(r.expired.map(a => a.address), ["0x1"])
+  assert.deepStrictEqual(r.state.undo.map(a => a.address), ["0x2"])
+  // Disabled timeout never expires.
+  r = M.expireParked(s, 9999999999, 0)
+  assert.deepStrictEqual(r.expired, [])
+  assert.strictEqual(r.state.undo.length, 2)
+})
+
+test("expireParked exempts unstamped entries and leaves redo alone", () => {
+  let s = M.createState({ parkTimeout: 10 })
+  s = M.pushPark(s, snap({ address: "0x1" }), 1000000).state
+  // Simulate a pre-timeout journal entry with no stamp.
+  s.undo[0].parkedAt = 0
+  const r = M.expireParked(s, 9999999999, 10)
+  assert.deepStrictEqual(r.expired, [])
+  assert.strictEqual(r.state.undo.length, 1)
+  // Redo entries are never expired even when ancient.
+  let s2 = M.createState({ parkTimeout: 10 })
+  s2 = M.pushPark(s2, snap({ address: "0x9" }), 1000000).state
+  const undone = M.undo(s2)
+  assert.strictEqual(undone.state.redo.length, 1)
+  const r2 = M.expireParked(undone.state, 9999999999, 10)
+  assert.deepStrictEqual(r2.expired, [])
+  assert.strictEqual(r2.state.redo.length, 1)
+})
+
+test("parkTimeout survives journal round-trip", () => {
+  let s = M.createState({ parkTimeout: 10 })
+  s = M.pushPark(s, snap({ address: "0x1" }), 1000000).state
+  const journal = M.toJournal(s, SESSION)
+  assert.strictEqual(journal.entries[0].parkedAt, 1000000)
+  const parsed = M.parseJournal(JSON.stringify({ schema: 1, session: SESSION, sequence: 1, entries: journal.entries }), SESSION)
+  assert.strictEqual(parsed.status, "ok")
+  assert.strictEqual(parsed.entries[0].parkedAt, 1000000)
+  // Pre-timeout journals without the field parse as exempt, not expired.
+  const legacy = M.parseJournal(JSON.stringify({ schema: 1, session: SESSION, sequence: 1, entries: [{ address: "0x2", workspace: "2", class: "foot", sequence: 2 }] }), SESSION)
+  assert.strictEqual(legacy.status, "ok")
+  assert.strictEqual(legacy.entries[0].parkedAt, 0)
+})
+
+test("reconcile keeps unstamped journal entries exempt from expiry", () => {
+  const live = (address, workspace, extra) => Object.assign({ address: address, workspace: workspace, class: "foot", title: "t", pid: 1, floating: false, fullscreen: 0, fullscreenClient: 0 }, extra || {})
+  const s = M.createState({ parkTimeout: 10 })
+  const legacy = [{ address: "0x1", workspace: "2", class: "foot", sequence: 1, parkedAt: 0 }]
+  const r = M.reconcile(s, legacy, [live("0x1", "special:reprieve")], 1)
+  assert.strictEqual(r.state.undo.length, 1)
+  assert.strictEqual(r.state.undo[0].parkedAt, 0)
+  const expired = M.expireParked(r.state, 9999999999, 10)
+  assert.deepStrictEqual(expired.expired, [])
+})
+
+test("restampParked grants a full timeout from enable time", () => {
+  let s = M.createState({ parkTimeout: 0 })
+  s = M.pushPark(s, snap({ address: "0x1" }), 1000000).state
+  s = M.pushPark(s, snap({ address: "0x2" }), 1001000).state
+  // Enabling much later would expire both on the spot without grace.
+  assert.strictEqual(M.expireParked(s, 2000000, 10).expired.length, 2)
+  const graced = M.restampParked(s, 2000000)
+  assert.strictEqual(graced.undo[0].parkedAt, 2000000)
+  assert.strictEqual(graced.undo[1].parkedAt, 2000000)
+  assert.deepStrictEqual(M.expireParked(graced, 2009000, 10).expired, [])
+  assert.strictEqual(M.expireParked(graced, 2010000, 10).expired.length, 2)
+})
+
+test("restampParked leaves exempt entries, redo and other types alone", () => {
+  let s = M.createState()
+  s = M.pushPark(s, snap({ address: "0x1" }), 1000000).state
+  s.undo[0].parkedAt = 0 // pre-timeout history stays exempt
+  s = M.pushRelaunch(s, snap({ address: "0xdead" })).state
+  const graced = M.restampParked(s, 2000000)
+  assert.strictEqual(graced, s) // nothing stamped: same ref
+  assert.strictEqual(s.undo[0].parkedAt, 0)
+  // Redo entries describe visible windows: never restamped, never expired.
+  const u = M.undo(M.pushPark(M.createState(), snap({ address: "0x2" }), 1000000).state)
+  const graced2 = M.restampParked(u.state, 2000000)
+  assert.strictEqual(graced2, u.state)
+  assert.strictEqual(u.state.redo[0].parkedAt, 1000000)
+  assert.deepStrictEqual(M.expireParked(u.state, 9999999999, 10).expired, [])
+  assert.strictEqual(M.restampParked(null, 2000000), null)
+  assert.strictEqual(M.restampParked(s, -5), s)
+})
+
+test("redo restarts the clock: re-hiding starts a new interval", () => {
+  let s = M.createState()
+  s = M.pushPark(s, snap({ address: "0x1" }), 1000000).state
+  const u = M.undo(s) // window visible again; entry waits in redo
+  const red = M.redo(u.state, 2000000)
+  assert.strictEqual(red.state.undo[0].parkedAt, 2000000)
+  // Old stamp would have expired at 1010000; new one survives past it.
+  assert.deepStrictEqual(M.expireParked(red.state, 1500000, 10).expired, [])
+  assert.strictEqual(M.expireParked(red.state, 2010000, 10).expired.length, 1)
+})
+
+test("reconcile with timeout on grants a fresh interval after restart", () => {
+  const rl = (address, workspace, extra) => Object.assign({ address: address, workspace: workspace, class: "foot", title: "t", pid: 1, floating: false, fullscreen: 0, fullscreenClient: 0 }, extra || {})
+  let s = M.createState({ parkTimeout: 10 })
+  s = M.pushPark(s, snap({ address: "0x1", class: "foot", workspace: "1" }), 1000000).state
+  const j = M.parseJournal(JSON.stringify(M.toJournal(s, SESSION)), SESSION)
+  // Without grace the old stamp would expire on the first sweep.
+  assert.strictEqual(M.expireParked(s, 2000000, 10).expired.length, 1)
+  const r = M.reconcile(M.createState({ parkTimeout: 10 }), j.entries, [rl("0x1", "special:reprieve")], j.sequence, 2000000)
+  assert.strictEqual(r.state.undo.length, 1)
+  assert.strictEqual(r.state.undo[0].parkedAt, 2000000)
+  assert.deepStrictEqual(M.expireParked(r.state, 2009000, 10).expired, [])
+  // Timeout off: stamps survive untouched.
+  const r2 = M.reconcile(M.createState(), j.entries, [rl("0x1", "special:reprieve")], j.sequence, 2000000)
+  assert.strictEqual(r2.state.undo[0].parkedAt, 1000000)
+  // Unstamped legacy entries stay exempt even with the timeout on.
+  const legacy = [{ address: "0x2", workspace: "2", class: "foot", sequence: 9, parkedAt: 0 }]
+  const r3 = M.reconcile(M.createState({ parkTimeout: 10 }), legacy, [rl("0x2", "special:reprieve")], 9, 2000000)
+  assert.strictEqual(r3.state.undo[0].parkedAt, 0)
+  assert.deepStrictEqual(M.expireParked(r3.state, 9999999999, 10).expired, [])
 })
 
 console.log("ReprieveModel tests passed (" + passed + ")")

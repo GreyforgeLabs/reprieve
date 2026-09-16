@@ -209,6 +209,7 @@ placed, otherwise under `plugins[]`).
 | Key                | Default | Effect                                                            |
 | ------------------ | ------- | ----------------------------------------------------------------- |
 | `maxStack`         | `10`    | How many windows may be hidden at once (1–20); the oldest is closed beyond that |
+| `parkTimeout`      | `0`     | Auto-close hidden windows after N seconds if not restored (`0` = off; `5`–`120` when enabled) |
 | `pauseMediaOnPark` | `true`  | Pause supported MPRIS players while hidden; audio without pause support keeps playing |
 | `trackAppClose`    | `true`  | Turn title-bar closes of relaunchable apps into Reopen rows        |
 | `showToast`        | `true`  | Corner notice on park and return (also **T** in the timeline)     |
@@ -220,6 +221,22 @@ placed, otherwise under `plugins[]`).
 ```json
 { "id": "tech.greyforge.reprieve", "maxStack": 10, "pauseMediaOnPark": true, "barTray": true }
 ```
+
+Enable the timeout with `reprieve set parkTimeout 30` (seconds, `5`–`120`;
+`0` disables it again; values outside the range are clamped and the
+effective value is reported). Restoring a window before its deadline cancels the
+timeout; the clock starts when the window is parked and survives shell
+restarts via the journal. Enabling the timeout grants every parked window
+a full timeout from that moment (no instant mass-close for age accrued
+while it was off), and a shell restart with the timeout on grants the same
+fresh interval instead of expiring windows for time spent parked while the
+shell was down; tightening an already-active timeout keeps the
+original park times. Restoring a window cancels its clock, and re-hiding
+it starts a fresh interval. Windows parked before this setting existed carry
+no timestamp and are exempt until they are parked again, so enabling the
+timeout never mass-closes existing history. While the timeout is active
+the timeline shows a per-window `closes in Ns` countdown; `reprieve doctor`
+and `reprieve bar status` report the setting.
 
 Parking uses media-player pause controls; it does not change application mute
 or volume. Players without MPRIS pause support may keep playing while hidden.

@@ -73,6 +73,24 @@ def ensure_dir(path: str) -> str | None:
     return None
 
 
+def dir_problem(state_dir: str) -> str | None:
+    """Refuse a state directory that is a symlink, not a directory, or not
+    ours. Missing is fine (read reports empty, write creates it)."""
+    try:
+        st = os.lstat(state_dir)
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return "irregular"
+    if stat.S_ISLNK(st.st_mode):
+        return "symlink"
+    if not stat.S_ISDIR(st.st_mode):
+        return "irregular"
+    if st.st_uid != os.getuid():
+        return "irregular"
+    return None
+
+
 def check_regular(path: str) -> tuple[str, os.stat_result | None]:
     """Classify the state file: missing | symlink | irregular | oversized | ok."""
     try:
@@ -94,6 +112,9 @@ def check_regular(path: str) -> tuple[str, os.stat_result | None]:
 
 def read_state(state_dir: str) -> dict:
     path = os.path.join(state_dir, STATE_FILE)
+    problem = dir_problem(state_dir)
+    if problem:
+        return {"status": problem, "text": "", "path": path}
     kind, st = check_regular(path)
     if kind == "missing":
         return {"status": "empty", "text": "", "path": path}
@@ -166,12 +187,17 @@ def write_state(state_dir: str, text: str) -> dict:
 
 
 def quarantine(state_dir: str, reason: str) -> dict:
+    problem = dir_problem(state_dir)
+    if problem:
+        return {"status": "error", "error": f"state directory is {problem}"}
     path = os.path.join(state_dir, STATE_FILE)
     kind, _ = check_regular(path)
     if kind == "missing":
         return {"status": "empty"}
     safe_reason = "".join(ch for ch in (reason or "damaged") if ch.isalnum() or ch in "-_")[:32] or "damaged"
-    target = os.path.join(state_dir, f"{STATE_FILE}.{safe_reason}.{int(time.time())}")
+    # PID in the name: two quarantines within the same second must not
+    # overwrite each other.
+    target = os.path.join(state_dir, f"{STATE_FILE}.{safe_reason}.{int(time.time())}.{os.getpid()}")
     try:
         if kind == "symlink":
             os.unlink(path)

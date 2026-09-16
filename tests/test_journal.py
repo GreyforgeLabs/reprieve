@@ -108,6 +108,19 @@ class JournalTests(unittest.TestCase):
         rc, out = run("read", self.state)
         self.assertEqual(out["status"], "irregular")
 
+    def test_read_refuses_symlinked_state_dir(self):
+        target = self.base / "real-state"
+        target.mkdir(mode=0o700)
+        (target / "state.json").write_text(DOC)
+        os.symlink(target, self.state)
+        rc, out = run("read", self.state)
+        self.assertEqual(out["status"], "symlink")
+        self.assertEqual(out["text"], "")
+        rc, out = run("quarantine", self.state)
+        self.assertNotEqual(out["status"], "ok")
+        # Nothing was touched through the link.
+        self.assertEqual((target / "state.json").read_text(), DOC)
+
     def test_quarantine_moves_damaged_file_aside(self):
         self.state.mkdir(mode=0o700)
         (self.state / "state.json").write_text("{corrupt")

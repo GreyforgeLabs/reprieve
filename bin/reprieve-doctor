@@ -118,6 +118,11 @@ def main() -> int:
             rows.append(("Bar widget", "placed" + ("" if bar.get("show", True) else ", hidden by showInBar"), True))
         else:
             rows.append(("Bar widget", "not placed (reprieve bar install)", True))
+        try:
+            timeout = int(status.get("parkTimeout") or 0)
+        except (TypeError, ValueError):
+            timeout = 0
+        rows.append(("Park timeout", "off" if timeout <= 0 else f"{timeout} s", True))
 
     # Media helper
     media_bins = ["pactl", "busctl", "python3"]

@@ -2,7 +2,43 @@
 
 All notable changes to Reprieve. Versions follow SemVer.
 
-## [Unreleased]
+## [1.2.0] – 2026-09-16
+
+### Added
+- Optional `parkTimeout` setting: auto-close parked windows not restored
+  within N seconds. Off (`0`) by default; `5`–`120` when enabled
+  (`reprieve set parkTimeout 30`, `0` to disable). The clock starts at park
+  time, restoring cancels it, and entries parked before this setting
+  existed are exempt until re-parked. Enabling the timeout grants parked
+  windows a full interval from that moment; a shell restart with the
+  timeout on grants the same fresh interval. Re-hiding a restored window
+  restarts its clock. Journal schema is unchanged (v1):
+  `parkedAt` is an optional field, so old and new versions read each
+  other's journals without quarantine.
+- Timeline rows show a per-window `closes in Ns` countdown while the
+  timeout is active (exempt rows show none).
+- `reprieve doctor` and `reprieve bar status` report the park timeout.
+- `reprieve set` reports the effective value when a setting is clamped
+  (`ok (using 5)`).
+- Live acceptance matrix covers the timeout: expiry, enable-grace, and
+  restore-cancels.
+
+### Fixed
+- A shell restart with the timeout on grants parked windows a fresh
+  interval instead of expiring them on the spot for age accrued while the
+  shell was down (same grace as enabling at runtime).
+- The timeline restores the clicked row by address, so a timeout sweep
+  landing between render and click can no longer restore the wrong window.
+- `reprieve remove-binds` removes the `~/.local/bin/reprieve` link even
+  when `bindings.lua` is already gone.
+- Binding backups are pruned to the five most recent.
+- A truncated `shell.json` read no longer resets all settings to defaults;
+  the last good entry is kept until the file parses again.
+- Quarantine filenames are PID-qualified so two quarantines within the
+  same second no longer overwrite each other.
+- The media helper answers `{"unmuted": 0, "played": 0}` instead of
+  tracebacking on a malformed resume payload, and skips non-dict mute
+  records and non-string player names.
 
 ### Removed
 - `reprieve migrate` and the setup card's migration path for marker blocks

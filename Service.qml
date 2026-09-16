@@ -29,6 +29,7 @@ Item {
   readonly property string bindsBin: pluginDir + "/bin/reprieve-binds"
   readonly property string parkWorkspace: Model.PARK_WORKSPACE
   readonly property int maxStack: Model.clampMax(setting("maxStack", Model.DEFAULT_MAX))
+  readonly property int parkTimeout: Model.clampParkTimeout(setting("parkTimeout", Model.DEFAULT_PARK_TIMEOUT))
   readonly property bool trackAppClose: setting("trackAppClose", true) !== false
   readonly property bool pauseMediaOnPark: setting("pauseMediaOnPark", true) !== false
   readonly property bool showToast: setting("showToast", true) !== false
@@ -49,7 +50,7 @@ Item {
   readonly property bool showInBar: setting("showInBar", true) !== false
   readonly property string session: Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE") || ""
 
-  property var model: Model.createState({ max: maxStack })
+  property var model: Model.createState({ max: maxStack, parkTimeout: parkTimeout })
   property var snapshots: ({})
   property var expected: ({})
   property var undoStack: []
@@ -88,8 +89,8 @@ Item {
   readonly property bool bindsInstalled: !!(bindsStatus && bindsStatus.installed)
   readonly property bool bindsLive: !!(bindsStatus && bindsStatus.live && bindsStatus.live.park)
   // Something the bar should point at: setup not done, bindings written but
-  // not loaded, or windows hidden without an
-  // entry. Empty string means all is well.
+  // not loaded, or windows hidden without an entry. Empty string means all
+  // is well.
   readonly property string attentionReason: {
     if (strandedCount > 0) return strandedCount + " hidden window" + (strandedCount === 1 ? "" : "s") + " without a timeline entry — open the timeline to recover"
     if (!bindsStatus) return ""
@@ -107,6 +108,25 @@ Item {
     root.publish()
   }
 
+  onParkTimeoutChanged: {
+    if (!root.model) return
+    // The model still holds the previous value: a 0 -> positive transition
+    // means the user just enabled the timeout. Grant every parked window a
+    // full timeout from now instead of expiring it on the spot for age
+    // accrued while the timeout was off. Tightening an active timeout
+    // keeps the original park times, so it can expire immediately.
+    var was = Model.clampParkTimeout(root.model.parkTimeout)
+    var nextTimeout = Model.cloneState(root.model)
+    nextTimeout.parkTimeout = parkTimeout
+    if (was <= 0 && parkTimeout > 0)
+      nextTimeout = Model.restampParked(nextTimeout, Date.now())
+    root.model = nextTimeout
+    root.publish()
+    // No persist: the timeout lives in shell.json, not the journal.
+    // commit() inside the sweep persists when entries actually expire.
+    if (parkTimeout > 0) root.sweepExpired()
+  }
+
   // ---------------------------------------------------------------- settings
 
   // Our entry may sit in bar.layout.<section> (a placed bar widget) or in
@@ -114,8 +134,15 @@ Item {
   function reloadSettings() {
     var found = {}
     var where = ""
+    var cfg
     try {
-      var cfg = JSON.parse(String(shellConfigFile.text() || "{}").slice(0, 1048576) || "{}")
+      cfg = JSON.parse(String(shellConfigFile.text() || "{}").slice(0, 1048576) || "{}")
+    } catch (e) {
+      // A truncated read (mid-write) must not reset every setting to its
+      // default: keep the last good entry until the file parses again.
+      return
+    }
+    try {
       var sections = ["left", "center", "right"]
       var layout = cfg && cfg.bar && cfg.bar.layout ? cfg.bar.layout : {}
       for (var s = 0; s < sections.length && !where; s++) {
@@ -138,23 +165,30 @@ Item {
     var allowed = {
       showToast: "bool", pauseMediaOnPark: "bool", trackAppClose: "bool",
       showInBar: "bool", barTray: "bool", hideBarWhenIdle: "bool",
-      maxStack: "int", barMaxIcons: "int", setupDismissed: "bool"
+      maxStack: "int", barMaxIcons: "int", setupDismissed: "bool",
+      parkTimeout: "int"
     }
     var kind = allowed[String(name)]
     if (!kind) return "unknown setting"
     var value
+    var asked = null
     if (kind === "bool") {
       var s = String(rawValue).toLowerCase()
       if (s === "true" || s === "on" || s === "1" || s === "yes") value = true
       else if (s === "false" || s === "off" || s === "0" || s === "no") value = false
       else return "expected on|off"
     } else {
-      value = Math.floor(Number(rawValue))
-      if (!isFinite(value)) return "expected a number"
+      asked = Math.floor(Number(rawValue))
+      if (!isFinite(asked)) return "expected a number"
+      value = asked
       if (name === "maxStack") value = Model.clampMax(value)
       if (name === "barMaxIcons") value = Math.max(1, Math.min(10, value))
+      if (name === "parkTimeout") value = Model.clampParkTimeout(value)
     }
-    return root.saveSetting(name, value) ? "ok" : "could not write shell.json"
+    if (!root.saveSetting(name, value)) return "could not write shell.json"
+    // Report the effective value: clamps (parkTimeout 3 -> 5) are silent
+    // surprises otherwise.
+    return (asked !== null && value !== asked) ? ("ok (using " + value + ")") : "ok"
   }
 
   function pluginEntry() {
@@ -742,6 +776,25 @@ Item {
     return "closed"
   }
 
+  // Park-timeout sweep: permanently close parked windows older than
+  // parkTimeout seconds. Only runs while the timeout is enabled; restoring
+  // a window removes it from the model so the sweep never sees it again.
+  // Returns the number of expired windows.
+  function sweepExpired() {
+    if (!root.model || !(root.parkTimeout > 0)) return 0
+    var result = Model.expireParked(root.model, Date.now(), root.parkTimeout)
+    if (!result.expired.length) return 0
+    root.commit(result.state)
+    for (var i = 0; i < result.expired.length; i++) {
+      var action = result.expired[i]
+      if (root.liveHandle(action.address)) root.closeAfterMedia(action.address, action.media)
+    }
+    var n = result.expired.length
+    root.lastResult = "expired " + n
+    root.toast("Closed " + n + " parked window" + (n === 1 ? "" : "s") + " (park timeout " + root.parkTimeout + "s)")
+    return n
+  }
+
   function undoLast() {
     var result = Model.undoAt(root.model, (root.model.undo || []).length - 1, { workspace: "" })
     return root.finishRestore(result, false)
@@ -970,6 +1023,7 @@ Item {
     summary.journal = root.journalStatus
     summary.session = root.session ? root.session.slice(0, 12) : ""
     summary.binds = root.bindsStatus ? !!root.bindsStatus.installed : null
+    summary.parkTimeout = root.parkTimeout
     return JSON.stringify(summary)
   }
 
@@ -980,6 +1034,13 @@ Item {
   Timer { id: persistDebounce; interval: 40; repeat: false; onTriggered: root.flushJournal() }
   Timer { id: reconcileTimer; interval: 500; repeat: false; onTriggered: root.reconcile() }
   Timer { id: expectSweep; interval: 5200; repeat: false; onTriggered: root.sweepExpected() }
+  Timer {
+    id: parkTimeoutSweep
+    interval: 1000
+    repeat: true
+    running: root.parkTimeout > 0 && root.parkedCount > 0
+    onTriggered: root.sweepExpired()
+  }
   Timer { id: cacheDebounce; interval: 150; repeat: false; onTriggered: root.cacheToplevels() }
   Timer { id: refreshDebounce; interval: 60; repeat: false; onTriggered: { try { Hyprland.refreshToplevels() } catch (e) {}; cacheDebounce.restart() } }
 
@@ -1194,7 +1255,7 @@ Item {
 
   Component.onCompleted: {
     root.reloadSettings()
-    root.model = Model.createState({ max: root.maxStack })
+    root.model = Model.createState({ max: root.maxStack, parkTimeout: root.parkTimeout })
     root.publish()
     root.cacheToplevels()
     try { Hyprland.refreshToplevels() } catch (e) {}

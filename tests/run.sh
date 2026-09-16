@@ -4,6 +4,8 @@
 # the CLI is available (it is on Omarchy; CI skips it).
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# py_compile leaves bin/__pycache__ behind (git-ignored, but local clutter).
+trap 'rm -rf bin/__pycache__' EXIT
 node tests/test_model.js
 python3 tests/test_journal.py
 python3 tests/test_binds.py

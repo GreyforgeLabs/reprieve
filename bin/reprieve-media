@@ -205,8 +205,13 @@ def resume(payload: dict) -> dict:
     by_index = {s["index"]: s for s in sinks}
     unmuted = 0
     for item in muted:
-        index = int(item.get("index") or 0)
-        pid = int(item.get("pid") or 0)
+        if not isinstance(item, dict):
+            continue
+        try:
+            index = int(item.get("index") or 0)
+            pid = int(item.get("pid") or 0)
+        except (TypeError, ValueError):
+            continue
         sink = by_index.get(index)
         if not sink:
             continue
@@ -215,7 +220,11 @@ def resume(payload: dict) -> dict:
         if run(["pactl", "set-sink-input-mute", str(index), "0"]).returncode == 0:
             unmuted += 1
     played = 0
+    if not isinstance(paused, list):
+        paused = []
     for name in paused:
+        if not isinstance(name, str) or not name:
+            continue
         if mpris_status(name) == "Paused":
             if mpris_call(name, "Play"):
                 played += 1
@@ -233,11 +242,16 @@ def main() -> int:
         json.dump(pause(args.pid, args.class_name), sys.stdout)
         return 0
     payload = {}
-    if args.payload:
-        payload = json.loads(args.payload)
-    else:
-        raw = sys.stdin.read().strip()
-        payload = json.loads(raw) if raw else {}
+    try:
+        if args.payload:
+            payload = json.loads(args.payload)
+        else:
+            raw = sys.stdin.read().strip()
+            payload = json.loads(raw) if raw else {}
+    except ValueError:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
     json.dump(resume(payload), sys.stdout)
     return 0
 

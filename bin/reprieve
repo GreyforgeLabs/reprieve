@@ -50,8 +50,9 @@ Usage: reprieve <command>
   uninstall     Restore parked windows and remove keybindings
   bar           Bar widget: status | install [left|center|right] |
                 show on|off | tray on|off | hide-idle on|off | icons N
-  set KEY VALUE Change a setting (maxStack, pauseMediaOnPark, trackAppClose,
-                showToast, showInBar, barTray, hideBarWhenIdle, barMaxIcons)
+  set KEY VALUE Change a setting (maxStack, parkTimeout, pauseMediaOnPark,
+                trackAppClose, showToast, showInBar, barTray, hideBarWhenIdle,
+                barMaxIcons)
   doctor        Check the installation without changing anything
 USAGE
 }
@@ -68,6 +69,8 @@ print("placed in bar   " + ("yes" if b.get("placed") else "no (run: reprieve bar
 print("show            " + ("on" if b.get("show", True) else "off"))
 print("tray icons      " + ("on" if b.get("tray", True) else "off") + " (max " + str(b.get("maxIcons", 5)) + ")")
 print("hide when idle  " + ("on" if b.get("hideWhenIdle", True) else "off"))
+t = d.get("parkTimeout") or 0
+print("park timeout    " + ("off (reprieve set parkTimeout N)" if not t else str(t) + " s"))
 print("parked          " + str(d.get("parked", 0)))'
       ;;
     install)
@@ -95,7 +98,9 @@ print("parked          " + str(d.get("parked", 0)))'
         printf '%s' "$saved" | python3 -c '
 import json, sys
 for k, v in (json.load(sys.stdin) or {}).items():
-    if k != "id": print(k, json.dumps(v))' | while read -r key value; do
+    if k != "id": print(k + "\t" + json.dumps(v))' | while IFS=$'\t' read -r key value; do
+          # Tab-separated: JSON values may contain spaces (string settings),
+          # but json.dumps never emits a literal tab, so this splits exactly.
           ipc setSetting "$key" "$value" >/dev/null
         done
       fi

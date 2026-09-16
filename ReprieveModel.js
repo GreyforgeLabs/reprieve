@@ -10,6 +10,9 @@ var PARK_WORKSPACE = "special:reprieve"
 var DEFAULT_MAX = 10
 var MIN_MAX = 1
 var MAX_MAX = 20
+var DEFAULT_PARK_TIMEOUT = 0
+var MIN_PARK_TIMEOUT = 5
+var MAX_PARK_TIMEOUT = 120
 var JOURNAL_SCHEMA = 1
 var JOURNAL_MAX_BYTES = 262144
 var JOURNAL_MAX_ENTRIES = 64
@@ -38,12 +41,43 @@ function clampMax(value) {
   return n
 }
 
+// Park timeout in seconds. 0 means off (the default). Any positive value
+// below the minimum clamps up to the minimum; anything above the maximum
+// clamps down. Non-numeric input disables the timeout rather than guessing.
+function clampParkTimeout(value) {
+  var n = Number(value)
+  if (!isFinite(n)) return DEFAULT_PARK_TIMEOUT
+  n = Math.floor(n)
+  if (n <= 0) return DEFAULT_PARK_TIMEOUT
+  if (n < MIN_PARK_TIMEOUT) return MIN_PARK_TIMEOUT
+  if (n > MAX_PARK_TIMEOUT) return MAX_PARK_TIMEOUT
+  return n
+}
+
+function nowMs(value) {
+  var n = Number(value)
+  if (isFinite(n) && n > 0) return Math.floor(n)
+  if (typeof Date !== "undefined" && Date.now) return Date.now()
+  return 0
+}
+
+// Parked-at stamps, floored to whole milliseconds. Entries without a
+// positive stamp predate the timeout feature and are exempt from expiry.
+function stampMs(value) {
+  return Math.floor(Number(value) || 0)
+}
+
+function hasStamp(value) {
+  return stampMs(value) > 0
+}
+
 function createState(opts) {
   opts = opts || {}
   return {
     undo: [],
     redo: [],
     max: clampMax(opts.max),
+    parkTimeout: clampParkTimeout(opts.parkTimeout),
     excluded: opts.excluded || defaultExcludedClasses(),
     parkWorkspace: opts.parkWorkspace || PARK_WORKSPACE,
     sequence: Math.max(0, Math.floor(Number(opts.sequence) || 0))
@@ -56,6 +90,7 @@ function cloneState(state) {
     undo: (state.undo || []).slice(),
     redo: (state.redo || []).slice(),
     max: clampMax(state.max),
+    parkTimeout: clampParkTimeout(state.parkTimeout),
     excluded: state.excluded || defaultExcludedClasses(),
     parkWorkspace: state.parkWorkspace || PARK_WORKSPACE,
     sequence: Math.max(0, Math.floor(Number(state.sequence) || 0))
@@ -101,7 +136,6 @@ function sanitizeLabel(value, maxLen) {
     out += title.charAt(i)
   }
   out = out.replace(/\s+/g, " ").trim()
-  if (out.length > maxLen) out = out.slice(0, Math.max(0, maxLen - 3)) + "..."
   return out || "window"
 }
 
@@ -152,7 +186,7 @@ function nextSequence(state) {
   return Math.max(0, Math.floor(Number(state.sequence) || 0)) + 1
 }
 
-function parkAction(snapshot, sequence) {
+function parkAction(snapshot, sequence, parkedAt) {
   var klass = sanitizeClass(snapshot.class)
   return {
     type: "park",
@@ -167,6 +201,7 @@ function parkAction(snapshot, sequence) {
     media: sanitizeMedia(snapshot.media),
     label: shortLabel({ title: snapshot.title, class: klass }),
     sequence: sequence,
+    parkedAt: nowMs(snapshot.parkedAt != null ? snapshot.parkedAt : parkedAt),
     recovered: snapshot.recovered === true
   }
 }
@@ -219,7 +254,7 @@ function capUndo(undo, max, kills) {
   return next
 }
 
-function pushPark(state, snapshot) {
+function pushPark(state, snapshot, nowOverride) {
   if (!canPark(snapshot, state)) {
     return { state: state, kills: [], action: null, reason: "excluded" }
   }
@@ -229,7 +264,7 @@ function pushPark(state, snapshot) {
   next.undo = next.undo.filter(function (a) { return !(a && a.address === addr) })
   next.redo = next.redo.filter(function (a) { return !(a && a.address === addr) })
   next.sequence = nextSequence(next)
-  var action = parkAction(snapshot, next.sequence)
+  var action = parkAction(snapshot, next.sequence, nowOverride)
   next.undo = next.undo.concat([action])
   next.redo = []
   var kills = []
@@ -240,7 +275,7 @@ function pushPark(state, snapshot) {
 // Adopt a live window that is already sitting on the park workspace but
 // that nobody remembers (stranded after a crash, moved there by hand, or an
 // overflow close the app refused). Never closes anything.
-function pushRecovered(state, snapshot) {
+function pushRecovered(state, snapshot, nowOverride) {
   var addr = normalizeAddress(snapshot && snapshot.address)
   if (!addr || !state) return { state: state, action: null, reason: "invalid" }
   if (findParked(state, addr) !== -1) return { state: state, action: null, reason: "tracked" }
@@ -261,7 +296,7 @@ function pushRecovered(state, snapshot) {
     fullscreen: 0,
     fullscreenClient: 0,
     recovered: true
-  }, next.sequence)
+  }, next.sequence, nowOverride)
   next.undo = next.undo.concat([action])
   return { state: next, action: action, reason: "recovered" }
 }
@@ -289,24 +324,32 @@ function undo(state) {
 
 function undoAt(state, index, opts) {
   opts = opts || {}
-  if (!state || !state.undo || index < 0 || index >= state.undo.length) {
+  // Crafted IPC can pass NaN or fractions: floor and re-check so a bad
+  // index is a no-op instead of appending undefined to redo.
+  var at = Math.floor(Number(index))
+  if (!state || !state.undo || !isFinite(at) || at < 0 || at >= state.undo.length) {
     return { state: state, effects: [], action: null }
   }
   var next = cloneState(state)
-  var action = next.undo[index]
-  next.undo = next.undo.slice(0, index).concat(next.undo.slice(index + 1))
+  var action = next.undo[at]
+  next.undo = next.undo.slice(0, at).concat(next.undo.slice(at + 1))
   next.redo = next.redo.concat([action])
   var effects = undoEffects(action, next, opts.workspace)
   return { state: next, effects: effects, action: action }
 }
 
-function redo(state) {
+function redo(state, nowOverride) {
   if (!state || !state.redo || state.redo.length === 0) {
     return { state: state, effects: [], action: null }
   }
   var next = cloneState(state)
   var action = next.redo[next.redo.length - 1]
   next.redo = next.redo.slice(0, -1)
+  if (action && action.type === "park") {
+    // Redo re-hides the window, starting a new hidden interval: restart
+    // the clock instead of inheriting the stamp from the original park.
+    action = Object.assign({}, action, { parkedAt: nowMs(nowOverride) })
+  }
   next.undo = next.undo.concat([action])
   var kills = []
   next.undo = capUndo(next.undo, next.max, kills)
@@ -416,6 +459,68 @@ function dropAddress(state, address) {
   return next
 }
 
+// Grace period for enabling the timeout: restamp every stamped undo entry
+// to now so the full timeout runs from enable time instead of expiring
+// windows on the spot for age accrued while the timeout was off. Entries
+// without a stamp (pre-timeout history) stay exempt, redo entries describe
+// visible windows and are never expirable, and redo() restamps on re-park.
+function restampParked(state, nowValue) {
+  if (!state || !state.undo) return state
+  var now = nowMs(nowValue)
+  if (now <= 0) return state
+  var changed = false
+  var undo = state.undo.map(function (a) {
+    if (!a || a.type !== "park" || !hasStamp(a.parkedAt)) return a
+    changed = true
+    var copy = Object.assign({}, a)
+    copy.parkedAt = now
+    return copy
+  })
+  if (!changed) return state
+  var next = cloneState(state)
+  next.undo = undo
+  return next
+}
+
+// Expire parked windows older than timeoutSec. Only undo entries are
+// eligible: redo entries describe visible windows waiting to be re-parked,
+// and closing those would destroy windows the user is looking at.
+// Entries without a parkedAt stamp (pre-timeout journals) are exempt so an
+// upgrade can never mass-close history it cannot date. Returns
+// { state, expired } where expired lists the removed park actions oldest
+// first. A non-positive timeout disables expiry entirely.
+function expireParked(state, nowValue, timeoutSec) {
+  var result = { state: state, expired: [] }
+  var timeout = clampParkTimeout(timeoutSec)
+  if (timeout <= 0 || !state || !state.undo) return result
+  var now = nowMs(nowValue)
+  if (now <= 0) return result
+  var deadline = timeout * 1000
+  var expiredAddrs = {}
+  var expired = []
+  for (var i = 0; i < state.undo.length; i++) {
+    var a = state.undo[i]
+    if (!a || a.type !== "park" || !a.address) continue
+    var stamped = stampMs(a.parkedAt)
+    if (stamped <= 0) continue
+    if (now - stamped >= deadline) {
+      expired.push(a)
+      expiredAddrs[a.address] = true
+    }
+  }
+  if (!expired.length) return result
+  var next = cloneState(state)
+  next.undo = next.undo.filter(function (a) {
+    return !(a && a.type === "park" && a.address && expiredAddrs[a.address])
+  })
+  next.redo = next.redo.filter(function (a) {
+    return !(a && a.type === "park" && a.address && expiredAddrs[a.address])
+  })
+  result.state = next
+  result.expired = expired
+  return result
+}
+
 // A parked window's process died. Keep the timeline entry as a safe Reopen
 // when the class is allowlisted; otherwise the entry is gone for good.
 function markDead(state, address) {
@@ -437,15 +542,13 @@ function markDead(state, address) {
   }
   next.undo = next.undo.map(convert).filter(function (a) { return !!a })
   next.redo = next.redo.filter(function (a) {
+    // A redo entry for the same address describes the same dead window.
+    // Converted (undo won) keeps the Reopen; otherwise this entry is gone.
     if (a && a.type === "park" && a.address === addr) { result.action = a; result.removed = !result.converted; return false }
     return true
   })
   result.state = next
   return result
-}
-
-function luaString(value) {
-  return String(value == null ? "" : value).replace(/\\/g, "\\\\").replace(/"/g, '\\"')
 }
 
 // Narrow allowlist. Nothing here is derived from argv or the environment.
@@ -506,6 +609,7 @@ function reset(state, currentWorkspace) {
   var restored = restoreAll(state, currentWorkspace)
   var next = createState({
     max: state && state.max,
+    parkTimeout: state && state.parkTimeout,
     excluded: state && state.excluded,
     parkWorkspace: state && state.parkWorkspace,
     sequence: state && state.sequence
@@ -552,6 +656,8 @@ function toJournal(state, session) {
       pid: clampInt(a.pid, 0, 4194304, 0),
       sequence: clampInt(a.sequence, 0, 2147483647, 0)
     }
+    var stamped = stampMs(a.parkedAt)
+    if (stamped > 0) entry.parkedAt = Math.min(stamped, 9007199254740991)
     if (a.media) entry.media = sanitizeMedia(a.media)
     if (a.recovered) entry.recovered = true
     entries.push(entry)
@@ -598,6 +704,7 @@ function parseJournal(raw, session) {
       fullscreenClient: clampInt(e.fullscreenClient, 0, 2, 0),
       pid: clampInt(e.pid, 0, 4194304, 0),
       sequence: clampInt(e.sequence, 0, 2147483647, 0),
+      parkedAt: Math.max(0, Math.floor(Number(e.parkedAt) || 0)),
       media: sanitizeMedia(e.media),
       recovered: e.recovered === true
     })
@@ -619,7 +726,10 @@ function parseJournal(raw, session) {
 //   * a journal entry with no live window becomes a Reopen only when the
 //     class is allowlisted, otherwise it is discarded;
 //   * a live parked window nobody remembers is exposed as "recovered".
-function reconcile(state, journalEntries, live, journalSequence) {
+//
+// nowValue ("now" for restamping) is optional; when omitted the clock reads
+// Date.now(). Tests pass an explicit value for determinism.
+function reconcile(state, journalEntries, live, journalSequence, nowValue) {
   var base = cloneState(state)
   var park = base.parkWorkspace
   var liveByAddr = {}
@@ -633,7 +743,7 @@ function reconcile(state, journalEntries, live, journalSequence) {
   var byAddress = {}
   var merged = []
 
-  function consider(action, source) {
+  function consider(action) {
     if (!action) return
     if (action.type !== "park") {
       merged.push(action)
@@ -665,10 +775,15 @@ function reconcile(state, journalEntries, live, journalSequence) {
     report.dropped.push(action.address)
   }
 
-  for (var u = 0; u < base.undo.length; u++) consider(base.undo[u], "state")
+  for (var u = 0; u < base.undo.length; u++) consider(base.undo[u])
   for (var j = 0; j < (journalEntries || []).length; j++) {
     var e = journalEntries[j]
-    consider(parkAction(e, e.sequence), "journal")
+    var journaled = parkAction(e, e.sequence)
+    // Pre-timeout journals carry no stamp: keep them exempt (parkedAt 0)
+    // instead of stamping "now", so enabling the timeout can never start
+    // the clock on history it cannot date.
+    if (!hasStamp(e.parkedAt)) journaled.parkedAt = 0
+    consider(journaled)
   }
 
   var seq = Math.max(base.sequence, clampInt(journalSequence, 0, 2147483647, 0))
@@ -708,6 +823,11 @@ function reconcile(state, journalEntries, live, journalSequence) {
   next.undo = merged
   next.redo = redo
   next.sequence = seq
+  // A shell restart re-arms enforcement: with the timeout on, grant every
+  // kept window a fresh interval instead of expiring it on the spot for age
+  // accrued while the shell was down. Same grace as enabling at runtime;
+  // unstamped pre-timeout history and redo entries stay exempt.
+  if (clampParkTimeout(next.parkTimeout) > 0) next = restampParked(next, nowValue)
   // Over capacity after recovery means the compositor holds more hidden
   // windows than policy allows; expose them anyway rather than closing
   // anything during startup. capUndo() only runs on new parks.
@@ -719,11 +839,15 @@ if (typeof module !== "undefined") {
     PLUGIN_ID: PLUGIN_ID,
     PARK_WORKSPACE: PARK_WORKSPACE,
     DEFAULT_MAX: DEFAULT_MAX,
+    DEFAULT_PARK_TIMEOUT: DEFAULT_PARK_TIMEOUT,
+    MIN_PARK_TIMEOUT: MIN_PARK_TIMEOUT,
+    MAX_PARK_TIMEOUT: MAX_PARK_TIMEOUT,
     JOURNAL_SCHEMA: JOURNAL_SCHEMA,
     JOURNAL_MAX_BYTES: JOURNAL_MAX_BYTES,
     JOURNAL_MAX_ENTRIES: JOURNAL_MAX_ENTRIES,
     defaultExcludedClasses: defaultExcludedClasses,
     clampMax: clampMax,
+    clampParkTimeout: clampParkTimeout,
     createState: createState,
     cloneState: cloneState,
     normalizeAddress: normalizeAddress,
@@ -748,7 +872,8 @@ if (typeof module !== "undefined") {
     findParked: findParked,
     dropAddress: dropAddress,
     markDead: markDead,
-    luaString: luaString,
+    expireParked: expireParked,
+    restampParked: restampParked,
     relaunchCommand: relaunchCommand,
     restoreAll: restoreAll,
     clear: clear,

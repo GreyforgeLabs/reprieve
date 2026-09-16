@@ -229,6 +229,27 @@ class BindTests(unittest.TestCase):
         rc, out = run("remove", config=self.home / "nope.lua", home=self.home)
         self.assertEqual(rc, 0)
 
+    def test_remove_without_config_still_removes_cli_link(self):
+        link = self.home / ".local" / "bin" / "reprieve"
+        link.symlink_to(BINDS.parent / "reprieve")
+        rc, out = run("remove", config=self.home / "nope.lua", home=self.home)
+        self.assertEqual(rc, 0)
+        self.assertEqual(out["removed"], 0)
+        self.assertEqual(out["cli_link"], "removed")
+        self.assertFalse(link.exists() or os.path.islink(link))
+
+    def test_backups_are_pruned_to_recent_ones(self):
+        self.config.write_text(USER_CONFIG)
+        for i in range(7):
+            (self.config.parent / f"bindings.lua.bak.2020010100000{i}").write_text("old")
+        rc, out = run("install", config=self.config, home=self.home)
+        self.assertEqual(rc, 0)
+        remaining = self.backups()
+        self.assertEqual(len(remaining), 5)
+        # The newest survivors are the latest fakes plus the fresh backup.
+        self.assertEqual(out["backup"], str(remaining[-1]))
+        self.assertEqual(remaining[-1].read_text(), USER_CONFIG)
+
     def test_no_unrelated_config_loss_through_full_cycle(self):
         original = USER_CONFIG + "\n-- trailing comment\n"
         self.config.write_text(original)

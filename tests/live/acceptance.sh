@@ -207,6 +207,27 @@ bar_json=$(ipc status | python3 -c 'import json,sys; b=json.load(sys.stdin).get(
 check "B  status reports bar placement and settings"  eq "$bar_json" "ok"
 check "B  restoreAddress (tray click path) restores the window" eq "$(ipc restoreAddress "$A" >/dev/null; sleep 0.5; ws_of "$A")" "$home_ws"
 
+# 20. park timeout: expiry, enable-grace, restore-cancels
+ipc setSetting parkTimeout 5 >/dev/null; sleep 0.3
+check "20 timeout value reported in status" eq "$(status_field parkTimeout)" "5"
+W=$(spawn)
+ipc parkWindow "$W" >/dev/null; sleep 7
+check "20 parked window auto-closes after the timeout" eq "$(ws_of "$W")|$(status_field parked)" "|0"
+ipc setSetting parkTimeout 0 >/dev/null
+# Enabling later grants a full interval from enable time, not park time.
+G=$(spawn)
+ipc parkWindow "$G" >/dev/null; sleep 3
+ipc setSetting parkTimeout 5 >/dev/null; sleep 3
+check "20 enabling grants a full timeout from enable time" eq "$(status_field parked)" "1"
+sleep 4
+check "20 window expires once the post-enable interval elapses" eq "$(ws_of "$G")|$(status_field parked)" "|0"
+# Restoring before the deadline cancels the clock.
+U=$(spawn)
+ipc parkWindow "$U" >/dev/null; sleep 2
+ipc undo >/dev/null; sleep 6
+check "20 restoring before the deadline cancels the timeout" eq "$(ws_of "$U")" "$home_ws"
+ipc setSetting parkTimeout 0 >/dev/null; sleep 0.3
+
 # hidden workspace agrees with the model at the end
 hidden=$(clients | python3 -c "import json,sys; print(sum(1 for c in json.load(sys.stdin) if c['workspace']['name']=='$PARK'))")
 check "Z  nothing left on $PARK"                eq "$hidden" "0"

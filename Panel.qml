@@ -20,6 +20,9 @@ Item {
   property bool cursorActive: true
   property string confirmAddress: ""
   property string setupMessage: ""
+  // Ticking clock for per-row timeout countdowns, refreshed by
+  // countdownTimer while the timeline is open with an active timeout.
+  property double nowTick: 0
   // An auto-opened setup card grabs keyboard focus while the user may still
   // be typing. Keyboard consent is disarmed for a moment so a stray Enter
   // cannot install anything; a mouse click is always deliberate.
@@ -55,6 +58,7 @@ Item {
         index: i,
         address: action.address || "",
         live: action.type === "park",
+        parkedAt: action.type === "park" ? Number(action.parkedAt || 0) : 0,
         where: action.workspace ? ("workspace " + action.workspace) : (action.type === "park" ? "workspace unknown" : "")
       })
     }
@@ -80,6 +84,7 @@ Item {
     root.selectedIndex = 0
     root.confirmAddress = ""
     root.setupMessage = ""
+    root.nowTick = Date.now()
     root.cursorActive = root.rows.length > 0
     if (service && service.refreshBindStatus) service.refreshBindStatus()
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
@@ -111,6 +116,19 @@ Item {
     root.selectedIndex = next
   }
 
+  // Per-row timeout countdown. Empty string means no deadline: timeout
+  // off, unstamped pre-timeout history, or a non-park row. Read inside the
+  // delegate (not baked into `rows`) so the 1 s tick updates text in place
+  // instead of rebuilding the list and resetting its scroll position.
+  function countdownSuffix(live, parkedAt) {
+    var timeout = root.service ? Number(root.service.parkTimeout || 0) : 0
+    var stamp = Number(parkedAt || 0)
+    if (!(timeout > 0 && live && stamp > 0)) return ""
+    var now = root.nowTick > 0 ? root.nowTick : Date.now()
+    var s = Math.max(0, Math.ceil((stamp + timeout * 1000 - now) / 1000))
+    return "closes in " + s + "s"
+  }
+
   function currentRow() {
     if (root.rows.length === 0) return null
     return root.rows[Math.min(root.selectedIndex, root.rows.length - 1)] || null
@@ -120,7 +138,12 @@ Item {
     if (!service) return
     var row = root.currentRow()
     if (!row) return
-    service.restoreAt(row.index, here === true)
+    // Rows snapshot their model index at render time, but the timeout sweep
+    // can remove entries between render and click. Resolve by address (the
+    // service finds the live index) and use the snapshot index only for
+    // address-less Reopen rows.
+    if (row.address) service.restoreAddress(row.address, here === true)
+    else service.restoreAt(row.index, here === true)
     root.afterRowChange()
   }
 
@@ -192,6 +215,16 @@ Item {
   Timer { id: confirmTimer; interval: 3000; repeat: false; onTriggered: root.confirmAddress = "" }
   Timer { id: armTimer; interval: 2500; repeat: false; onTriggered: root.armed = true }
   Timer { id: setupCloseTimer; interval: 1600; repeat: false; onTriggered: { if (root.view === "setup") root.view = "timeline" } }
+  // Refresh the per-row timeout countdowns once a second. Runs only while
+  // the timeline is open with an active timeout and rows to show.
+  Timer {
+    id: countdownTimer
+    interval: 1000
+    repeat: true
+    running: root.opened && root.view === "timeline" && root.rows.length > 0
+      && (root.service ? Number(root.service.parkTimeout || 0) > 0 : false)
+    onTriggered: root.nowTick = Date.now()
+  }
 
   PanelWindow {
     id: panel
@@ -437,8 +470,12 @@ Item {
                 }
                 Text {
                   width: parent.width
-                  visible: !!modelData.where
-                  text: modelData.where
+                  visible: !!modelData.where || root.countdownSuffix(modelData.live, modelData.parkedAt) !== ""
+                  text: {
+                    var suffix = root.countdownSuffix(modelData.live, modelData.parkedAt)
+                    if (!suffix) return modelData.where
+                    return modelData.where ? (modelData.where + " · " + suffix) : suffix
+                  }
                   textFormat: Text.PlainText
                   elide: Text.ElideRight
                   color: selected ? root.selectedText : root.muted
