@@ -483,6 +483,17 @@ test("pushRecovered adopts a stranded window without closing anything", () => {
 
 // ------------------------------------------------------------- park timeout
 
+test("flight is subtle by default and only accepts off|subtle|angel", () => {
+  assert.deepStrictEqual(M.FLIGHT_MODES, ["off", "subtle", "angel"])
+  assert.strictEqual(M.DEFAULT_FLIGHT, "subtle")
+  assert.strictEqual(M.normalizeFlight(undefined), "subtle")
+  assert.strictEqual(M.normalizeFlight(""), "subtle")
+  assert.strictEqual(M.normalizeFlight("Angel "), "angel")
+  assert.strictEqual(M.normalizeFlight("OFF"), "off")
+  assert.strictEqual(M.normalizeFlight("cartoon"), "subtle")
+  assert.strictEqual(M.normalizeFlight(true), "subtle")
+})
+
 test("parkTimeout is off by default and clamps to 5-120", () => {
   assert.strictEqual(M.DEFAULT_PARK_TIMEOUT, 0)
   assert.strictEqual(M.MIN_PARK_TIMEOUT, 5)

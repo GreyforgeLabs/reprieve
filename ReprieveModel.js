@@ -61,6 +61,17 @@ function nowMs(value) {
   return 0
 }
 
+// Flight: the park/restore effect drawn by the overlay. "subtle" glides a
+// snapshot of the window into the bar mark and back; "angel" adds the winged
+// light that swoops in to carry it; "off" is a plain cut. Unknown input
+// falls back to the default rather than guessing.
+var FLIGHT_MODES = ["off", "subtle", "angel"]
+var DEFAULT_FLIGHT = "subtle"
+function normalizeFlight(value) {
+  var v = String(value === undefined || value === null ? "" : value).trim().toLowerCase()
+  return FLIGHT_MODES.indexOf(v) === -1 ? DEFAULT_FLIGHT : v
+}
+
 // Parked-at stamps, floored to whole milliseconds. Entries without a
 // positive stamp predate the timeout feature and are exempt from expiry.
 function stampMs(value) {
@@ -848,6 +859,9 @@ if (typeof module !== "undefined") {
     defaultExcludedClasses: defaultExcludedClasses,
     clampMax: clampMax,
     clampParkTimeout: clampParkTimeout,
+    FLIGHT_MODES: FLIGHT_MODES,
+    DEFAULT_FLIGHT: DEFAULT_FLIGHT,
+    normalizeFlight: normalizeFlight,
     createState: createState,
     cloneState: cloneState,
     normalizeAddress: normalizeAddress,

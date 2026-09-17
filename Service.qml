@@ -34,6 +34,8 @@ Item {
   readonly property bool pauseMediaOnPark: setting("pauseMediaOnPark", true) !== false
   readonly property bool showToast: setting("showToast", true) !== false
   readonly property bool setupDismissed: setting("setupDismissed", false) === true
+  // Park/restore effect: off | subtle | angel (see Model.normalizeFlight).
+  readonly property string flight: Model.normalizeFlight(setting("flight", Model.DEFAULT_FLIGHT))
   // Bar widget preferences (also overridable per layout entry in shell.json).
   readonly property bool barTray: setting("barTray", true) !== false
   readonly property int barMaxIcons: Math.max(1, Math.min(10, Math.floor(Number(setting("barMaxIcons", 5)) || 5)))
@@ -61,6 +63,116 @@ Item {
   // Live windows on the park workspace that no timeline entry claims.
   property int strandedCount: 0
   signal windowParked(string address)
+
+  // ---- flight: the overlay animates a snapshot of the window into the bar
+  // mark (and back). The service stays in charge of the actual move: a job
+  // is handed to the overlay, which calls flightCut(token) at the moment
+  // the real window should go (park) or arrive (restore). A watchdog cuts
+  // anyway if the overlay never answers, so a park can never hang.
+  signal flightPark(var job)
+  signal flightRestore(var job)
+  signal flightArrived(string address)
+  // The overlay registers itself here; without a handler every park and
+  // restore is a plain cut.
+  property var flightHandler: null
+  // Screen-local position of the bar mark, per screen name, published by
+  // the bar widget. The overlay flies to and from it.
+  property var barAnchors: ({})
+  property var pendingFlights: ({})
+  property int flightSequence: 0
+
+  function setBarAnchor(screen, x, y, size) {
+    var name = String(screen || "")
+    if (!name) return
+    var next = {}
+    for (var k in root.barAnchors) next[k] = root.barAnchors[k]
+    next[name] = { x: Math.round(Number(x) || 0), y: Math.round(Number(y) || 0), size: Math.round(Number(size) || 0) }
+    root.barAnchors = next
+  }
+
+  function monitorFor(id) {
+    try {
+      var list = Hyprland.monitors ? (Hyprland.monitors.values || []) : []
+      for (var i = 0; i < list.length; i++) if (list[i] && Number(list[i].id) === Number(id)) return list[i]
+    } catch (e) {}
+    return null
+  }
+
+  // A flight job for a live window, or null when flights are off, nobody
+  // draws them, or the window's place on screen is unknown. A park reads
+  // the window's geometry from Hyprland; a restore asks the overlay for the
+  // place it remembers from the park (the live geometry is the park
+  // workspace's).
+  function flightJob(kind, handle, address) {
+    if (root.flight === "off" || !root.flightHandler || !handle) return null
+    var addr = Model.normalizeAddress(address)
+    var job = { token: "f" + (++root.flightSequence), kind: kind, mode: root.flight, address: addr, handle: handle }
+    if (kind === "restore") {
+      var mem = null
+      try { mem = root.flightHandler.remembered(addr) } catch (e) {}
+      if (!mem || !mem.rect || !mem.screen) return null
+      job.screen = String(mem.screen)
+      job.rect = mem.rect
+      return job
+    }
+    var ipc = handle.lastIpcObject || {}
+    var at = ipc.at, size = ipc.size
+    if (!at || !size || at.length < 2 || size.length < 2) return null
+    var mon = root.monitorFor(ipc.monitor)
+    if (!mon || !mon.name) return null
+    var scale = Number(mon.scale) || 1
+    job.screen = String(mon.name)
+    // hyprctl reports layout pixels; the overlay draws in the screen's
+    // logical pixels
+    job.rect = {
+      x: Math.round((Number(at[0]) - Number(mon.x || 0)) / scale),
+      y: Math.round((Number(at[1]) - Number(mon.y || 0)) / scale),
+      w: Math.max(1, Math.round(Number(size[0]) / scale)),
+      h: Math.max(1, Math.round(Number(size[1]) / scale))
+    }
+    return job
+  }
+
+  function beginFlight(job, cut) {
+    var next = {}
+    for (var k in root.pendingFlights) next[k] = root.pendingFlights[k]
+    next[job.token] = { job: job, cut: cut, started: Date.now() }
+    root.pendingFlights = next
+    flightWatchdog.restart()
+    if (job.kind === "park") root.flightPark(job)
+    else root.flightRestore(job)
+  }
+
+  // Called by the overlay at the cut moment; idempotent.
+  function flightCut(token) {
+    var pending = root.pendingFlights[String(token)]
+    if (!pending) return "unknown"
+    var next = {}
+    for (var k in root.pendingFlights) if (k !== String(token)) next[k] = root.pendingFlights[k]
+    root.pendingFlights = next
+    try { pending.cut() } catch (e) { console.warn("reprieve: flight cut failed", e) }
+    return "ok"
+  }
+
+  function flightLanded(address) {
+    root.flightArrived(Model.normalizeAddress(address))
+  }
+
+  Timer {
+    id: flightWatchdog
+    interval: 1500
+    repeat: true
+    running: Object.keys(root.pendingFlights).length > 0
+    onTriggered: {
+      var now = Date.now()
+      for (var k in root.pendingFlights) {
+        if (now - root.pendingFlights[k].started >= 1400) {
+          console.warn("reprieve: flight", k, "timed out; cutting")
+          root.flightCut(k)
+        }
+      }
+    }
+  }
   property string lastLabel: ""
   property string lastResult: ""
   property string recoveryNotice: ""
@@ -166,13 +278,16 @@ Item {
       showToast: "bool", pauseMediaOnPark: "bool", trackAppClose: "bool",
       showInBar: "bool", barTray: "bool", hideBarWhenIdle: "bool",
       maxStack: "int", barMaxIcons: "int", setupDismissed: "bool",
-      parkTimeout: "int"
+      parkTimeout: "int", flight: "flight"
     }
     var kind = allowed[String(name)]
     if (!kind) return "unknown setting"
     var value
     var asked = null
-    if (kind === "bool") {
+    if (kind === "flight") {
+      if (Model.FLIGHT_MODES.indexOf(String(rawValue).trim().toLowerCase()) === -1) return "expected off|subtle|angel"
+      value = Model.normalizeFlight(rawValue)
+    } else if (kind === "bool") {
       var s = String(rawValue).toLowerCase()
       if (s === "true" || s === "on" || s === "1" || s === "yes") value = true
       else if (s === "false" || s === "off" || s === "0" || s === "no") value = false
@@ -696,13 +811,24 @@ Item {
     var workspace = Model.normalizeWorkspace(effect.workspace)
     if (!workspace || Model.isSpecialWorkspace(workspace)) workspace = root.currentWorkspace()
     if (!workspace) workspace = "1"
-    root.moveSilent(effect.address, workspace)
-    root.setFloating(effect.address, !!effect.floating)
-    if (effect.fullscreen > 0 || effect.fullscreenClient > 0)
-      root.setFullscreen(effect.address, effect.fullscreen, effect.fullscreenClient)
-    if (focus) root.focusWindow(effect.address)
-    animClear.queue(effect.address)
-    root.requestResume(effect.media)
+    var cut = function() {
+      root.moveSilent(effect.address, workspace)
+      root.setFloating(effect.address, !!effect.floating)
+      if (effect.fullscreen > 0 || effect.fullscreenClient > 0)
+        root.setFullscreen(effect.address, effect.fullscreen, effect.fullscreenClient)
+      if (focus) root.focusWindow(effect.address)
+      animClear.queue(effect.address)
+      root.requestResume(effect.media)
+    }
+    // A window coming back to another workspace switches there first (the
+    // focus would have done that anyway) so the flight happens in view.
+    var job = root.flightJob("restore", root.liveHandle(effect.address), effect.address)
+    if (job && focus && workspace !== root.currentWorkspace() && !Model.isSpecialWorkspace(workspace))
+      root.hyprDispatch('hl.dsp.focus({ workspace = "' + workspace + '" })')
+    else if (job && !focus && workspace !== root.currentWorkspace())
+      job = null
+    if (job) root.beginFlight(job, cut)
+    else cut()
     return true
   }
 
@@ -740,10 +866,15 @@ Item {
     var result = Model.pushPark(previous, snapshot)
     if (result.reason !== "parked") { root.lastResult = "passthrough"; return "passthrough" }
     root.commit(result.state)
-    if (snapshot.fullscreen > 0) root.setFullscreen(snapshot.address, 0, 0)
-    root.moveSilent(snapshot.address, root.parkWorkspace)
     root.applyKills(result.kills, previous)
-    root.requestPause(snapshot)
+    var cut = function() {
+      if (snapshot.fullscreen > 0) root.setFullscreen(snapshot.address, 0, 0)
+      root.moveSilent(snapshot.address, root.parkWorkspace)
+      root.requestPause(snapshot)
+    }
+    var job = root.flightJob("park", handle, snapshot.address)
+    if (job) root.beginFlight(job, cut)
+    else cut()
     root.lastResult = "parked"
     root.toast("Parked " + Model.toastLabel(result.action) + " — Super+Z to undo")
     root.windowParked(snapshot.address)
@@ -1021,6 +1152,7 @@ Item {
     summary.entry = root.entryLocation
     summary.bar = { placed: root.entryLocation === "bar", show: root.showInBar, tray: root.barTray, hideWhenIdle: root.hideBarWhenIdle, maxIcons: root.barMaxIcons }
     summary.journal = root.journalStatus
+    summary.flight = { mode: root.flight, handler: !!root.flightHandler, pending: Object.keys(root.pendingFlights).length, flown: root.flightHandler ? Number(root.flightHandler.flown || 0) : 0, anchors: root.barAnchors }
     summary.session = root.session ? root.session.slice(0, 12) : ""
     summary.binds = root.bindsStatus ? !!root.bindsStatus.installed : null
     summary.parkTimeout = root.parkTimeout
@@ -1249,6 +1381,8 @@ Item {
     function bindsStatus(): string { root.refreshBindStatus(); return JSON.stringify(root.bindsStatus || {}) }
     function installBinds(arg: string): string { return root.installBinds(arg) }
     function setSetting(name: string, value: string): string { return root.setSetting(name, value) }
+    function setFlight(mode: string): string { return root.setSetting("flight", mode) }
+    function flightCut(token: string): string { return root.flightCut(token) }
     function settings(): string { return JSON.stringify(root.pluginEntry()) }
     function removeBinds(): string { return root.removeBinds() }
   }

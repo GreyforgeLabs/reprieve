@@ -2,6 +2,34 @@
 
 All notable changes to Reprieve. Versions follow SemVer.
 
+## [1.4.0] – 2026-09-17
+
+### Added
+- **Flights.** Parking a window flies a snapshot of it into the Reprieve
+  bar mark (which flares as it lands); restoring flies it back and the live
+  window takes over on touchdown. New `flight` setting — `subtle` (default),
+  `angel` (a winged light swoops down from the mark, lifts the window and
+  carries it home; restoring is the same trip in reverse — she rises out
+  of the mark with it, sets it down, and flies back) or `off` (the previous
+  cut) — via `reprieve set flight …`, the timeline's **Flight** control
+  (**F** / Shift+F) or the shell.json entry. `Flight.qml` draws on a
+  per-screen overlay layer that is mapped only while a flight is in the
+  air and never takes input. The service keeps ownership of the real
+  move: the overlay calls back at the handover frame and a 1.4 s watchdog
+  moves the window anyway if it never does. Restores landing on another
+  workspace stay cuts; snapshots are not persisted across shell restarts.
+- The bar widget publishes the mark's on-screen position per screen
+  (`status` reports it under `flight.anchors`) so flights land on it;
+  `flight.flown` counts completed flights.
+- A restore to another workspace switches there first and then flies
+  (the focus would have switched anyway); restores without focus that
+  land elsewhere stay cuts.
+
+### Changed
+- The timeline's preference cards are a 2×2 grid, each with a one-line
+  description (Toasts, Pause audio, Auto-close, Flight) instead of a
+  single cramped row.
+
 ## [1.3.0] – 2026-09-16
 
 ### Changed

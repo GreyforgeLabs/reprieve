@@ -50,7 +50,7 @@ Usage: reprieve <command>
   uninstall     Restore parked windows and remove keybindings
   bar           Bar widget: status | install [left|center|right] |
                 show on|off | tray on|off | hide-idle on|off | icons N
-  set KEY VALUE Change a setting (maxStack, parkTimeout, pauseMediaOnPark,
+  set KEY VALUE Change a setting (maxStack, parkTimeout, flight, pauseMediaOnPark,
                 trackAppClose, showToast, showInBar, barTray, hideBarWhenIdle,
                 barMaxIcons)
   doctor        Check the installation without changing anything

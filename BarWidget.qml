@@ -73,12 +73,38 @@ BarWidget {
     root.openTimeline()
   }
 
+  // The mark flares when a window is parked — at the moment the flight
+  // lands on it when flights are on, or right away when they are off.
   Connections {
     target: root.service
     ignoreUnknownSignals: true
-    function onWindowParked() { root.pulse = true; pulseTimer.restart() }
+    function onWindowParked() { if (!root.service || root.service.flight === "off" || !root.service.flightHandler) root.flare() }
+    function onFlightArrived() { root.flare() }
   }
+  function flare() { root.pulse = true; pulseTimer.restart() }
   Timer { id: pulseTimer; interval: 1200; repeat: false; onTriggered: root.pulse = false }
+
+  // Publish the mark's place on its screen (screen-local logical pixels)
+  // so flights know where to land. Re-published whenever the bar lays the
+  // widget out again.
+  function publishAnchor() {
+    var w = root.QsWindow.window
+    if (!w || !w.screen || !root.service || typeof root.service.setBarAnchor !== "function") return
+    // hidden while idle: not laid out, so its position means nothing yet
+    if (!root.visible || root.width <= 0) return
+    var p = summaryMark.mapToItem(null, summaryMark.width / 2, summaryMark.height / 2)
+    var sx = p.x, sy = p.y
+    var pos = bar ? String(bar.position) : "top"
+    if (pos === "bottom") sy += w.screen.height - w.height
+    else if (pos === "right") sx += w.screen.width - w.width
+    root.service.setBarAnchor(w.screen.name, sx, sy, summaryMark.size)
+  }
+  Timer { id: anchorSettle; interval: 60; repeat: false; onTriggered: root.publishAnchor() }
+  onXChanged: anchorSettle.restart()
+  onWidthChanged: anchorSettle.restart()
+  onVisibleChanged: anchorSettle.restart()
+  onServiceChanged: anchorSettle.restart()
+  Component.onCompleted: anchorSettle.restart()
 
   Flow {
     id: layout

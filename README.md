@@ -85,6 +85,24 @@ Two outcomes exist in the timeline, and Reprieve is careful to tell them apart:
   `omarchy-launch-browser` and `omarchy-launch-webapp https://<host>` are ever
   invoked. Reprieve does not record command lines and cannot replay one.
 
+## The flight
+
+Parking is not a cut. A snapshot of the window lifts off, glides into the
+Reprieve mark in the bar and the mark flares as it lands; restoring flies
+it back out and the live window takes over the instant it touches down.
+That is `flight: subtle`, the default. `flight: angel` sends a winged light
+swooping down from the mark to carry the window home and bring it back —
+the guardian the plugin is named for. `flight: off` keeps the plain cut.
+Cycle it from the timeline with **F** (Shift+F back) or with
+`reprieve set flight angel`.
+
+The effect is drawn on an overlay layer that exists only while a flight is
+in the air, never takes input, and never delays anything: the real move
+happens at the frame the snapshot takes over, and a watchdog performs it
+regardless if the overlay does not answer. After a shell restart the first
+restore of a window parked before the restart is a plain cut (the snapshot
+is not persisted).
+
 ## The timeline
 
 `Super+Shift+Z` shows everything Reprieve can bring back, most recent at the top.
@@ -221,6 +239,7 @@ placed, otherwise under `plugins[]`).
 | `pauseMediaOnPark` | `true`  | Pause supported MPRIS players while hidden; audio without pause support keeps playing |
 | `trackAppClose`    | `true`  | Turn title-bar closes of relaunchable apps into Reopen rows        |
 | `showToast`        | `true`  | Corner notice on park and return (also **T** in the timeline)     |
+| `flight`           | `subtle` | Park/restore effect: `off`, `subtle` (snapshot glides to the bar) or `angel` (winged light carries it) — **F** in the timeline |
 | `showInBar`        | `true`  | Show the bar widget                                               |
 | `barTray`          | `true`  | Per-window icons in the bar (off = glyph and count)               |
 | `barMaxIcons`      | `5`     | Icons before collapsing into `+N` (1–10)                          |

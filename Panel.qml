@@ -31,6 +31,7 @@ Item {
   // cannot install anything; a mouse click is always deliberate.
   property bool armed: false
 
+  readonly property real prefHeight: Math.round(buttonHeight * 1.55)
   readonly property color background: Color.menu.background
   readonly property color foreground: Color.menu.text
   readonly property color border: Color.menu.border
@@ -153,6 +154,16 @@ Item {
     var n = Number(seconds || 0)
     if (n <= 0) return "Off"
     return n >= 60 && n % 60 === 0 ? (n / 60) + " min" : n + " s"
+  }
+
+  // Flight steps off -> subtle -> angel (Shift+F back).
+  readonly property string flightValue: service ? Model.normalizeFlight(service.flight) : Model.DEFAULT_FLIGHT
+  function cycleFlight(direction) {
+    if (!service || typeof service.setSetting !== "function") return
+    var modes = Model.FLIGHT_MODES
+    var idx = modes.indexOf(root.flightValue)
+    var next = modes[((idx === -1 ? 0 : idx) + (direction < 0 ? -1 : 1) + modes.length) % modes.length]
+    service.setSetting("flight", next)
   }
 
   function cycleParkTimeout(direction) {
@@ -386,6 +397,7 @@ Item {
           else if (event.key === Qt.Key_T) { if (service && service.toggleShowToast) service.toggleShowToast(); event.accepted = true }
           else if (event.key === Qt.Key_M) { root.togglePauseMedia(); event.accepted = true }
           else if (event.key === Qt.Key_P) { root.cycleParkTimeout(event.modifiers & Qt.ShiftModifier ? -1 : 1); event.accepted = true }
+          else if (event.key === Qt.Key_F) { root.cycleFlight(event.modifiers & Qt.ShiftModifier ? -1 : 1); event.accepted = true }
           else if (event.key === Qt.Key_S) { root.view = "setup"; event.accepted = true }
         }
       }
@@ -535,10 +547,11 @@ Item {
       component PrefSwitch: Rectangle {
         id: sw
         property string label: ""
+        property string description: ""
         property string hint: ""
         property bool on: false
         signal toggled()
-        height: root.buttonHeight
+        height: root.prefHeight
         radius: root.innerRadius
         color: swMouse.containsMouse ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12) : root.faint
         border.width: 1
@@ -549,15 +562,11 @@ Item {
           anchors.leftMargin: Style.spacing.md
           anchors.rightMargin: Style.spacing.md
           spacing: Style.space(6)
-          Text {
+          PrefLabel {
             anchors.verticalCenter: parent.verticalCenter
             width: parent.width - track.width - hintCap.width - parent.spacing * 2
-            text: sw.label
-            textFormat: Text.PlainText
-            elide: Text.ElideRight
-            color: root.foreground
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.body
+            label: sw.label
+            description: sw.description
           }
           Keycap {
             id: hintCap
@@ -598,16 +607,43 @@ Item {
         }
       }
 
+      // Name plus a one-line explanation, used by every preference card.
+      component PrefLabel: Column {
+        property string label: ""
+        property string description: ""
+        spacing: Style.space(1)
+        Text {
+          width: parent.width
+          text: parent.label
+          textFormat: Text.PlainText
+          elide: Text.ElideRight
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+        }
+        Text {
+          width: parent.width
+          visible: parent.description !== ""
+          text: parent.description
+          textFormat: Text.PlainText
+          elide: Text.ElideRight
+          color: root.muted
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+        }
+      }
+
       // A labelled value that steps through presets: click / wheel-up / P
       // for the next one, right-click / wheel-down / Shift+P for the previous.
       component PrefStepper: Rectangle {
         id: st
         property string label: ""
+        property string description: ""
         property string hint: ""
         property string value: ""
         property bool active: false
         signal stepped(int direction)
-        height: root.buttonHeight
+        height: root.prefHeight
         radius: root.innerRadius
         color: stMouse.containsMouse ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12) : root.faint
         border.width: 1
@@ -618,15 +654,11 @@ Item {
           anchors.leftMargin: Style.spacing.md
           anchors.rightMargin: Style.spacing.md
           spacing: Style.space(6)
-          Text {
+          PrefLabel {
             anchors.verticalCenter: parent.verticalCenter
             width: parent.width - valuePill.width - stHint.width - parent.spacing * 2
-            text: st.label
-            textFormat: Text.PlainText
-            elide: Text.ElideRight
-            color: root.foreground
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.body
+            label: st.label
+            description: st.description
           }
           Keycap {
             id: stHint
@@ -1093,33 +1125,49 @@ Item {
             onClicked: root.restoreAll()
           }
 
-          Row {
+          Grid {
             width: parent.width
-            spacing: Style.spacing.md
+            columns: 2
+            columnSpacing: Style.spacing.md
+            rowSpacing: Style.spacing.sm
+            readonly property real cell: (width - Style.spacing.md) / 2
 
             PrefSwitch {
-              width: (parent.width - Style.spacing.md * 2) / 3
+              width: parent.cell
               label: "Toasts"
+              description: "Corner notice on park and return"
               hint: "T"
               on: service && service.showToast !== false
               onToggled: if (service && service.toggleShowToast) service.toggleShowToast()
             }
 
             PrefSwitch {
-              width: (parent.width - Style.spacing.md * 2) / 3
+              width: parent.cell
               label: "Pause audio"
+              description: "Pause media players while parked"
               hint: "M"
               on: service && service.pauseMediaOnPark !== false
               onToggled: root.togglePauseMedia()
             }
 
             PrefStepper {
-              width: (parent.width - Style.spacing.md * 2) / 3
+              width: parent.cell
               label: "Auto-close"
+              description: "Close parked windows on a timer"
               hint: "P"
               value: root.timeoutLabel(root.parkTimeoutValue)
               active: root.parkTimeoutValue > 0
               onStepped: function(direction) { root.cycleParkTimeout(direction) }
+            }
+
+            PrefStepper {
+              width: parent.cell
+              label: "Flight"
+              description: root.flightValue === "angel" ? "A winged light carries the window" : (root.flightValue === "subtle" ? "The window glides into the bar" : "Park and restore are a plain cut")
+              hint: "F"
+              value: root.flightValue
+              active: root.flightValue !== "off"
+              onStepped: function(direction) { root.cycleFlight(direction) }
             }
           }
         }
@@ -1168,6 +1216,9 @@ Item {
     for (var i = 0; i < root.conflicts.length; i++) replace.push(root.conflicts[i].action)
     return { replace: replace }
   }
+
+  // Park/restore flights (their own overlay layers, mapped only in flight).
+  Flight { service: root.service }
 
   PanelWindow {
     id: toastPanel
