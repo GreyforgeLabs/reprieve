@@ -4,15 +4,15 @@
   <desc id="desc">A floating halo above a pair of swept angel wings. Transparent background.</desc>
   <defs>
     <linearGradient id="wing" x1="0" y1="12" x2="0" y2="55" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#ACF7FF"/>
-      <stop offset=".32" stop-color="#38DEF5"/>
-      <stop offset=".65" stop-color="#139DEB"/>
-      <stop offset="1" stop-color="#2563E8"/>
+      <stop offset="0" stop-color="#16BBD8"/>
+      <stop offset=".32" stop-color="#079CCF"/>
+      <stop offset=".65" stop-color="#0877D1"/>
+      <stop offset="1" stop-color="#2459CB"/>
     </linearGradient>
     <linearGradient id="halo" x1="25" y1="7" x2="39" y2="14" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#9DEFFF"/>
-      <stop offset=".55" stop-color="#4FE1F6"/>
-      <stop offset="1" stop-color="#249DED"/>
+      <stop offset="0" stop-color="#13B5D4"/>
+      <stop offset=".55" stop-color="#089FCE"/>
+      <stop offset="1" stop-color="#157AD0"/>
     </linearGradient>
   </defs>
   <ellipse cx="32" cy="10.5" rx="7.5" ry="2.65" fill="none" stroke="url(#halo)" stroke-width="2.4"/>

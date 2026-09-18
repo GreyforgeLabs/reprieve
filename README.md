@@ -135,23 +135,25 @@ has three parts:
   <img src="docs/screenshots/bar-and-toast.png" alt="The Reprieve bar widget and toast" width="420">
 </p>
 
-- the Greyforge mark as a status glyph: its amber core grows when windows
-  are parked, flares for a beat whenever one is parked, and switches to your
-  theme's alert colour whenever attention is needed — setup incomplete,
-  shortcuts written but not loaded, or a hidden window with no timeline
-  entry — jumping you to the fix when clicked;
+- the angel mark as a status glyph: a status dot rides its lower-left
+  corner — amber while windows are parked, your theme's alert colour
+  whenever attention is needed (setup incomplete, shortcuts written but
+  not loaded, or a hidden window with no timeline entry — clicking jumps
+  you to the fix). The whole mark swells for a beat whenever one is
+  parked;
 - one application icon per hidden window, newest first — left-click returns
   it home, right-click pulls it to the current workspace;
 - a `+N` overflow once more windows are hidden than icons shown.
 
-Left-click the glyph for the timeline, right-click to bring back the latest
-window, middle-click to bring back all of them. The widget pulses when a
-window is parked and fades out entirely when there is nothing to show.
+Left-click the mark for the timeline, right-click to bring back the latest
+window, middle-click to bring back all of them. The mark swells when a
+window is parked. The widget stays in the bar at all times — the safety
+net is visible even when idle — unless you opt out:
 
 ```sh
-reprieve bar status           # placement and toggles
-reprieve bar hide-idle off    # stay visible even when idle
-reprieve bar tray off         # glyph and count only
+reprieve bar status            # placement and toggles
+reprieve bar hide-idle on     # fade out when there is nothing to show
+reprieve bar tray off         # mark and count only
 reprieve bar icons 8          # icons before collapsing to +N (1–10)
 reprieve bar show off         # remove from the bar; the service keeps running
 reprieve bar install center   # place it, or move it to another section
@@ -246,7 +248,7 @@ placed, otherwise under `plugins[]`).
 | `showInBar`        | `true`  | Show the bar widget                                               |
 | `barTray`          | `true`  | Per-window icons in the bar (off = glyph and count)               |
 | `barMaxIcons`      | `5`     | Icons before collapsing into `+N` (1–10)                          |
-| `hideBarWhenIdle`  | `true`  | Fade the widget out when nothing is hidden and nothing needs attention |
+| `hideBarWhenIdle`  | `false` | Fade the widget out when nothing is hidden and nothing needs attention (`true` restores hide-when-idle) |
 
 ```json
 { "id": "tech.greyforge.reprieve", "maxStack": 10, "pauseMediaOnPark": true, "barTray": true }

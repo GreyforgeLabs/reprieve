@@ -2,7 +2,7 @@
 
 All notable changes to Reprieve. Versions follow SemVer.
 
-## [Unreleased]
+## [1.4.1] – 2026-09-18
 
 ### Fixed
 - **Second Super+W no longer destroys the parked window.** After a park,
@@ -21,6 +21,21 @@ All notable changes to Reprieve. Versions follow SemVer.
   `bin/reprieve` against stubbed `omarchy-shell`/`hyprctl` (park, refusal,
   dead shell, empty output, forced timeout, close action) and runs as part
   of `tests/run.sh`.
+
+### Changed
+- **New angel branding.** The bar mark, the setup/timeline hero, the empty
+  timeline state and the corner toast now wear the guardian-wings mark
+  (halo over swept wings, cyan to electric blue) from `brand/icons/`
+  (`brand/ReprieveAngel.qml`, compact geometry at taskbar sizes, deeper
+  art automatically on light surfaces). State the old hexagon carried in
+  its core now rides a status dot on the mark's lower-left: amber while
+  windows are parked, the theme urgent colour when attention is needed;
+  the park pulse stays a swell of the whole mark. The Greyforge Labs
+  hexagon remains as the foundry signature in the wordmark footers.
+- **The bar widget stays put.** `hideBarWhenIdle` now defaults to `false`:
+  the mark is visible at all times so the safety net reads as present even
+  when idle. Set it `true` (`reprieve bar hide-idle on`) for the old
+  fade-out behaviour; existing explicit settings are honoured.
 
 ## [1.4.0] – 2026-09-17
 

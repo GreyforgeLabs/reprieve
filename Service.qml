@@ -39,7 +39,9 @@ Item {
   // Bar widget preferences (also overridable per layout entry in shell.json).
   readonly property bool barTray: setting("barTray", true) !== false
   readonly property int barMaxIcons: Math.max(1, Math.min(10, Math.floor(Number(setting("barMaxIcons", 5)) || 5)))
-  readonly property bool hideBarWhenIdle: setting("hideBarWhenIdle", true) !== false
+  // The mark stays in the bar at all times so the safety net is visible
+  // even when idle; users can still fade it with hideBarWhenIdle.
+  readonly property bool hideBarWhenIdle: setting("hideBarWhenIdle", false) !== false
   readonly property string home: Quickshell.env("HOME") || ""
   readonly property string stateHome: Quickshell.env("XDG_STATE_HOME") || (home + "/.local/state")
   readonly property string stateDir: stateHome + "/reprieve"

@@ -412,31 +412,14 @@ Item {
         implicitHeight: Math.max(heroMark.height, heroLabels.implicitHeight)
         height: implicitHeight
 
-        GreyforgeMark {
+        ReprieveAngel {
           id: heroMark
           anchors.left: parent.left
           anchors.verticalCenter: parent.verticalCenter
           size: Style.space(44)
-          steel: root.foreground
-          plate: root.background
-          core: hero.alert ? Color.urgent : root.brandAmber
-          coreScale: 0.2
-          // the parked-window emblem: a window outline returning to place
-          Item {
-            anchors.fill: parent
-            Rectangle {
-              anchors.centerIn: parent
-              anchors.horizontalCenterOffset: -parent.width * 0.06
-              anchors.verticalCenterOffset: -parent.height * 0.10
-              width: parent.width * 0.62
-              height: parent.height * 0.44
-              radius: 2
-              color: "transparent"
-              border.width: 1
-              border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.85)
-              Rectangle { anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right; height: 1; anchors.topMargin: 3; color: parent.border.color; opacity: 0.7 }
-            }
-          }
+          surface: root.background
+          dot: Color.urgent
+          showDot: hero.alert
         }
 
         Column {
@@ -1071,13 +1054,11 @@ Item {
             anchors.centerIn: parent
             width: parent.width
             spacing: Style.space(10)
-            GreyforgeMark {
+            ReprieveAngel {
               anchors.horizontalCenter: parent.horizontalCenter
               size: Style.space(72)
-              steel: root.foreground
-              plate: root.background
-              coreScale: 0.16
-              opacity: 0.55
+              surface: root.background
+              artOpacity: 0.55
             }
             Text {
               anchors.horizontalCenter: parent.horizontalCenter
@@ -1259,12 +1240,10 @@ Item {
         anchors.centerIn: parent
         anchors.horizontalCenterOffset: Style.space(3)
         spacing: Style.space(8)
-        GreyforgeMark {
+        ReprieveAngel {
           anchors.verticalCenter: parent.verticalCenter
           size: Style.space(20)
-          steel: root.foreground
-          plate: root.background
-          coreScale: 0.28
+          surface: root.background
         }
         Text {
           id: toastLabel

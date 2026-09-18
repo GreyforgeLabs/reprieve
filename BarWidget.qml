@@ -9,7 +9,8 @@ import "brand"
 
 // Reprieve bar widget: the place a parked window visibly went.
 //
-//   glyph [count]   — always; amber when something needs attention
+//   angel mark      — always; status dot amber while parked, urgent colour
+//                     when something needs attention
 //   app icons       — one per parked window, newest first (barTray)
 //
 // Stateless: everything comes from the live service. Under a replacement bar
@@ -34,7 +35,7 @@ BarWidget {
   readonly property string attentionReason: service ? String(service.attentionReason || "") : ""
   readonly property bool tray: setting("tray", service ? service.barTray : true) !== false
   readonly property int maxIcons: Math.max(1, Math.min(10, Math.floor(Number(setting("maxIcons", service ? service.barMaxIcons : 5)) || 5)))
-  readonly property bool hideWhenIdle: setting("hideWhenIdle", service ? service.hideBarWhenIdle : true) !== false
+  readonly property bool hideWhenIdle: setting("hideWhenIdle", service ? service.hideBarWhenIdle : false) !== false
   readonly property bool showInBar: setting("showInBar", service ? service.showInBar : true) !== false
   readonly property var trayEntries: tray ? parkedEntries.slice(0, maxIcons) : []
   readonly property int overflow: tray ? Math.max(0, parked - maxIcons) : parked
@@ -112,9 +113,10 @@ BarWidget {
     flow: root.vertical ? Flow.TopToBottom : Flow.LeftToRight
     spacing: Style.space(1)
 
-    // Summary slot: the Greyforge hexagon with the parked count riding on
-    // its lower-right corner. The core turns urgent when attention is needed
-    // and flares brighter for a beat whenever a window is parked.
+    // Summary slot: the angel mark with the parked count riding on its
+    // lower-right corner. A status dot rides lower-left: amber while
+    // windows are parked, the theme urgent colour when attention is
+    // needed. The whole mark swells for a beat whenever one is parked.
     WidgetButton {
       id: summary
       bar: root.bar
@@ -126,19 +128,16 @@ BarWidget {
       tooltipText: root.summaryTooltip()
       onPressed: function(button) { root.onSummaryPressed(button) }
 
-      GreyforgeMark {
+      ReprieveAngel {
         id: summaryMark
         anchors.centerIn: parent
         anchors.horizontalCenterOffset: root.vertical || root.overflow === 0 ? 0 : -Style.space(3)
         size: root.iconSize + Style.space(2)
-        steel: root.foreground
-        plate: bar ? bar.background : Color.bar.background
-        core: root.attention ? (bar ? bar.urgent : Color.urgent) : root.brandAmber
-        coreScale: root.pulse ? 0.36 : (root.parked > 0 ? 0.28 : 0.2)
-        seams: root.parked > 0 || root.attention
+        surface: bar ? bar.background : Color.bar.background
+        dot: root.attention ? (bar ? bar.urgent : Color.urgent) : root.brandAmber
+        showDot: root.parked > 0 || root.attention
         scale: root.pulse ? 1.15 : 1
         Behavior on scale { NumberAnimation { duration: 180; easing.type: Easing.OutBack } }
-        Behavior on coreScale { NumberAnimation { duration: 180 } }
       }
 
       // Count badge
