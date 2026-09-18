@@ -862,6 +862,16 @@ Item {
     var handle = root.liveHandle(address)
     if (!handle) { root.lastResult = "empty"; return "empty" }
     var snapshot = root.snapshotFromHandle(handle)
+    // Focus routinely lingers on the window just parked (Hyprland keeps it
+    // focused until something else takes focus; with a single window there
+    // is nothing else). A second Super+W in that state targets our own
+    // hidden window: no-op instead of "passthrough", because the keybind
+    // wrapper turns anything but parked|empty into a real close.
+    if (snapshot.workspace === root.parkWorkspace
+        && Model.findParked(root.model, snapshot.address) !== -1) {
+      root.lastResult = "empty"
+      return "empty"
+    }
     var previous = root.model
     var result = Model.pushPark(previous, snapshot)
     if (result.reason !== "parked") { root.lastResult = "passthrough"; return "passthrough" }

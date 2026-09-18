@@ -2,6 +2,26 @@
 
 All notable changes to Reprieve. Versions follow SemVer.
 
+## [Unreleased]
+
+### Fixed
+- **Second Super+W no longer destroys the parked window.** After a park,
+  Hyprland focus routinely lingers on the just-hidden window (with a single
+  window on the workspace it never leaves), so a second Super+W targeted
+  Reprieve's own hidden window. The service answered `passthrough` and the
+  keybind wrapper turned that into a real close. Pressing Super+W on an
+  already-parked window is now a no-op (`empty`); all flight modes affected.
+- **Slow shell no longer turns Super+W into a close.** The wrapper
+  distinguished only the response text, so an IPC answer arriving after the
+  0.6 s `timeout` (empty output) fell through to a real Hyprland close.
+  A timed-out park (`timeout` exit 124) now exits quietly and leaves the
+  window alone; only an explicit refusal or a fast transport failure
+  (shell truly down) still degrades to a close, as documented.
+- New offline coverage: `tests/test_wrapper.sh` drives the real
+  `bin/reprieve` against stubbed `omarchy-shell`/`hyprctl` (park, refusal,
+  dead shell, empty output, forced timeout, close action) and runs as part
+  of `tests/run.sh`.
+
 ## [1.4.0] – 2026-09-17
 
 ### Added

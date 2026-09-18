@@ -11,9 +11,16 @@ ACTION="${1:-help}"
 shift || true
 
 ipc() {
+  # Echoes the plugin response. Exit status mirrors omarchy-shell, so callers
+  # can tell "slow shell" (124, timed out) apart from "dead shell" (fast
+  # transport failure, empty output). That distinction matters below: a slow
+  # shell must never turn a safety-net key into a real close.
   local method="$1"
   shift || true
-  timeout 0.6 omarchy-shell "$PLUGIN_ID" "$method" "$@" 2>/dev/null || true
+  local out rc
+  out=$(timeout 0.6 omarchy-shell "$PLUGIN_ID" "$method" "$@" 2>/dev/null); rc=$?
+  printf '%s' "$out"
+  return "$rc"
 }
 
 hypr_close_active() {
@@ -116,11 +123,17 @@ for k, v in (json.load(sys.stdin) or {}).items():
 
 case "$ACTION" in
   park)
-    result="$(ipc park)"
+    result="$(ipc park)"; rc=$?
     case "$result" in
       parked|empty) exit 0 ;;
-      *) hypr_close_active; exit 0 ;;
     esac
+    # Timed out waiting for the shell: it is slow, not gone. A safety-net
+    # key must degrade to doing nothing here, never to destroying the
+    # focused window (a second Super+W routinely lands while the first
+    # park's flight is still in the air). Only a fast, explicit failure
+    # (shell truly down) falls through to a real close below.
+    if [[ $rc -eq 124 ]]; then exit 0; fi
+    hypr_close_active; exit 0
     ;;
   close|kill|permanent)
     result="$(ipc close)"

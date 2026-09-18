@@ -184,7 +184,10 @@ A hidden window whose process exits later becomes a Reopen row or is removed
 with a brief notice. Nothing stays hidden without a route back.
 
 If `omarchy-shell` itself is down, `Super+W` and `Super+Alt+W` degrade to a
-plain Hyprland close rather than doing nothing.
+plain Hyprland close rather than doing nothing. A shell that is merely slow
+to answer is different from a shell that is down: a timed-out park leaves
+the window untouched. Pressing `Super+W` while focus still lingers on the
+window just parked is a no-op, never a close.
 
 ## Command line
 
