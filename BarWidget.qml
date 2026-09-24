@@ -37,6 +37,7 @@ BarWidget {
   readonly property int maxIcons: Math.max(1, Math.min(10, Math.floor(Number(setting("maxIcons", service ? service.barMaxIcons : 5)) || 5)))
   readonly property bool hideWhenIdle: setting("hideWhenIdle", service ? service.hideBarWhenIdle : false) !== false
   readonly property bool showInBar: setting("showInBar", service ? service.showInBar : true) !== false
+  readonly property bool monochrome: setting("monochrome", service && service.barMonochrome ? true : false) === true
   readonly property var trayEntries: tray ? parkedEntries.slice(0, maxIcons) : []
   readonly property int overflow: tray ? Math.max(0, parked - maxIcons) : parked
   readonly property string glyph: ""
@@ -134,6 +135,8 @@ BarWidget {
         anchors.horizontalCenterOffset: root.vertical || root.overflow === 0 ? 0 : -Style.space(3)
         size: root.iconSize + Style.space(2)
         surface: bar ? bar.background : Color.bar.background
+        color: root.foreground
+        symbolic: root.monochrome
         dot: root.attention ? (bar ? bar.urgent : Color.urgent) : root.brandAmber
         showDot: root.parked > 0 || root.attention
         scale: root.pulse ? 1.15 : 1
