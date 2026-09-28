@@ -56,7 +56,7 @@ def main() -> int:
         problems.append(f"plugin not answering; enable it with: omarchy plugin enable {PLUGIN_ID}")
 
     # Journal
-    rc, out = run(["python3", os.path.join(HERE, "reprieve-journal"), "inspect"])
+    rc, out = run([os.path.join(HERE, "reprieve-journal"), "inspect"])
     journal = load_json(out) if rc == 0 else None
     jstatus = (journal or {}).get("status", "unknown")
     if jstatus in ("ok", "empty"):

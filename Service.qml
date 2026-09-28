@@ -389,13 +389,13 @@ Item {
     if (quarantineProcess.running) { persistDebounce.restart(); return }
     root.journalDirty = false
     journalWriter.payload = root.pendingJournalText
-    journalWriter.command = ["python3", root.journalBin, "write", "--state-dir", root.stateDir]
+    journalWriter.command = [root.journalBin, "write", "--state-dir", root.stateDir]
     journalWriter.running = true
   }
 
   function readJournal() {
     if (journalReader.running) return
-    journalReader.command = ["python3", root.journalBin, "read", "--state-dir", root.stateDir]
+    journalReader.command = [root.journalBin, "read", "--state-dir", root.stateDir]
     journalReader.running = true
   }
 
@@ -422,7 +422,7 @@ Item {
 
   function quarantineJournal(reason) {
     console.warn("reprieve: quarantining recovery journal:", reason)
-    quarantineProcess.command = ["python3", root.journalBin, "quarantine", "--state-dir", root.stateDir, "--reason", String(reason || "damaged").replace(/[^A-Za-z0-9_-]/g, "")]
+    quarantineProcess.command = [root.journalBin, "quarantine", "--state-dir", root.stateDir, "--reason", String(reason || "damaged").replace(/[^A-Za-z0-9_-]/g, "")]
     quarantineProcess.running = true
   }
 

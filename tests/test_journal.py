@@ -13,7 +13,7 @@ JOURNAL = Path(__file__).resolve().parents[1] / "bin" / "reprieve-journal"
 
 
 def run(action, state_dir, stdin=None, extra=None):
-    cmd = [sys.executable, str(JOURNAL), action, "--state-dir", str(state_dir)] + (extra or [])
+    cmd = [str(JOURNAL), action, "--state-dir", str(state_dir)] + (extra or [])
     proc = subprocess.run(cmd, input=stdin, capture_output=True, text=True, timeout=10)
     out = json.loads(proc.stdout.strip() or "{}")
     return proc.returncode, out
@@ -68,6 +68,19 @@ class JournalTests(unittest.TestCase):
         rc, out = run("write", self.state, stdin="[" + "1," * 200000 + "1]")
         self.assertEqual(rc, 1)
         self.assertFalse((self.state / "state.json").exists())
+
+    def test_write_accepts_json_scalars(self):
+        for value in ("null", "1", "true", '"hello"'):
+            with self.subTest(value=value):
+                rc, out = run("write", self.state, stdin=value)
+                self.assertEqual(rc, 0, out)
+                self.assertEqual(json.loads((self.state / "state.json").read_text()), json.loads(value))
+
+    def test_write_rejects_nonstandard_json(self):
+        for value in ("{'x':1}", '{"x":1,}', '[1,]', '/*comment*/{}', '01'):
+            with self.subTest(value=value):
+                rc, out = run("write", self.state, stdin=value)
+                self.assertEqual(rc, 1, out)
 
     def test_read_refuses_symlink(self):
         self.state.mkdir(mode=0o700)
@@ -133,6 +146,10 @@ class JournalTests(unittest.TestCase):
         self.assertEqual(moved[0].read_text(), "{corrupt")
         rc, out = run("quarantine", self.state)
         self.assertEqual(out["status"], "empty")
+
+    def test_quarantine_missing_directory_is_empty(self):
+        rc, out = run("quarantine", self.state)
+        self.assertEqual((rc, out["status"]), (0, "empty"))
 
     def test_inspect_is_read_only(self):
         run("write", self.state, stdin=DOC)

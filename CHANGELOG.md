@@ -2,6 +2,23 @@
 
 All notable changes to Reprieve. Versions follow SemVer.
 
+## [1.5.0] – 2026-09-28
+
+### Added
+- An optional native C recovery journal handles reads, atomic writes,
+  quarantine, and inspection. Build it with `make native` in the plugin
+  directory; the launcher uses Python when the native binary is absent.
+  The build needs a C compiler, `pkg-config`, and `json-c` development headers.
+- The offline suite now runs in CI with both journal implementations, and
+  `tests/bench_journal.py` reproduces the read/write benchmark.
+
+### Performance
+- In a local benchmark, the median of 60 launches with a 64-entry journal
+  was roughly 45 ms for Python and 3.3 ms for C via
+  the launcher, for both reads and writes: about 14× lower latency. Process
+  CPU time also fell by about 14–15×. These are local measurements of the
+  optional native path, not a guarantee for every system.
+
 ## [1.4.1] – 2026-09-18
 
 ### Fixed

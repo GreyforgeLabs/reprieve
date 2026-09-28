@@ -47,6 +47,12 @@ Your applications' own `Ctrl+Z` is never touched. Requirements are a stock
 Omarchy 4 install (Hyprland ≥ 0.56, Python 3 standard library, `hyprctl`,
 `pactl`, `busctl`); there is nothing extra to install.
 
+For a faster recovery journal, install a C compiler and `json-c` development
+headers, then run `make native` in the plugin directory. The journal launcher
+uses the local C binary when present and otherwise uses the Python version.
+`make clean` removes the native binary. Run `python3 tests/bench_journal.py`
+after building to compare read/write latency and CPU time on your machine.
+
 ## Consent first
 
 Turning the plugin on changes nothing on disk. The setup card is the
