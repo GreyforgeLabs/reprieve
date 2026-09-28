@@ -2,6 +2,20 @@
 
 All notable changes to Reprieve. Versions follow SemVer.
 
+## [1.5.1] – 2026-09-28
+
+### Fixed
+- **All-Reopen timeline is usable again.** Reopen rows no longer reserve the
+  96 px Del slot for a button that never shows, so titles use the full row
+  width and the REOPEN chip sits at the right edge.
+- **Reopen restore works.** `pushRelaunch` no longer stores the dead
+  Hyprland address; the timeline resolves Reopen rows by stable sequence
+  (`restoreBySequence`), so a timeout sweep expiring a parked entry above
+  can no longer shift the click onto the wrong window.
+- **Del forgets a Reopen entry.** Reopen windows are already gone, so a
+  single Delete drops the entry (`forgetReopen`) instead of doing nothing.
+  Parked windows keep the two-step confirm and media cleanup.
+
 ## [1.5.0] – 2026-09-28
 
 ### Added

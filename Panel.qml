@@ -72,6 +72,7 @@ Item {
         kind: kind,
         index: i,
         address: action.address || "",
+        sequence: Number(action.sequence || 0),
         live: action.type === "park",
         parkedAt: action.type === "park" ? Number(action.parkedAt || 0) : 0,
         where: action.workspace ? ("workspace " + action.workspace) : (action.type === "park" ? "workspace unknown" : "")
@@ -203,10 +204,11 @@ Item {
     var row = root.currentRow()
     if (!row) return
     // Rows snapshot their model index at render time, but the timeout sweep
-    // can remove entries between render and click. Resolve by address (the
-    // service finds the live index) and use the snapshot index only for
-    // address-less Reopen rows.
-    if (row.address) service.restoreAddress(row.address, here === true)
+    // can remove entries between render and click. Park rows resolve by live
+    // address (sweep-safe); Reopen rows are address-less and resolve by
+    // sequence, which survives entries expiring above them.
+    if (row.live && row.address) service.restoreAddress(row.address, here === true)
+    else if (typeof service.restoreBySequence === "function") service.restoreBySequence(row.sequence, here === true)
     else service.restoreAt(row.index, here === true)
     root.afterRowChange()
   }
@@ -218,11 +220,18 @@ Item {
   }
 
   // Permanent close takes two presses of Delete (or two clicks) on the same
-  // row so a stray key cannot destroy a live window.
+  // row so a stray key cannot destroy a live window. Reopen rows are already
+  // gone, so a single Delete just forgets the entry.
   function closeSelected() {
     if (!service) return
     var row = root.currentRow()
-    if (!row || !row.live || !row.address) return
+    if (!row) return
+    if (!row.live) {
+      if (typeof service.forgetReopen === "function") service.forgetReopen(row.sequence)
+      root.afterRowChange()
+      return
+    }
+    if (!row.address) return
     if (root.confirmAddress !== row.address) {
       root.confirmAddress = row.address
       confirmTimer.restart()
@@ -890,6 +899,11 @@ Item {
             readonly property bool selected: root.cursorActive && index === root.selectedIndex
             readonly property bool confirming: modelData.address && root.confirmAddress === modelData.address
             readonly property bool hot: selected || rowMouse.containsMouse
+            // The Del button only exists for live parked rows when hot. The
+            // title column must grow when it is gone, otherwise Reopen rows
+            // truncate early and leave a dead 96px gap on the right (the
+            // visible bug in the all-Reopen timeline).
+            readonly property bool showClose: modelData.live && rowItem.hot
             readonly property string iconSource: root.iconFor(modelData.klass)
             readonly property string countdown: root.countdownSuffix(modelData.live, modelData.parkedAt)
             width: list.width
@@ -953,7 +967,7 @@ Item {
 
               Column {
                 anchors.verticalCenter: parent.verticalCenter
-                width: parent.width - iconPlate.width - kindChip.width - Style.space(96) - Style.spacing.md * 3
+                width: parent.width - iconPlate.width - kindChip.width - (rowItem.showClose ? Style.space(96) : 0) - Style.spacing.md * (rowItem.showClose ? 3 : 2)
                 spacing: Style.space(2)
                 Text {
                   width: parent.width
@@ -1016,7 +1030,7 @@ Item {
                 width: Style.space(96)
                 height: Math.max(Style.space(26), Style.font.caption + Style.spacing.xs * 2)
                 radius: root.innerRadius
-                visible: modelData.live && rowItem.hot
+                visible: rowItem.showClose
                 color: rowItem.confirming ? Color.urgent : root.faint
                 border.width: 1
                 border.color: rowItem.confirming ? Color.urgent : root.hairline

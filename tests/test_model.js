@@ -648,4 +648,35 @@ test("reconcile with timeout on grants a fresh interval after restart", () => {
   assert.deepStrictEqual(M.expireParked(r3.state, 9999999999, 10).expired, [])
 })
 
+test("reopen entries are address-less and resolve by sequence", () => {
+  let s = M.createState()
+  s = M.pushPark(s, snap({ address: "0x1", workspace: "1" }), 1000000).state
+  s = M.pushRelaunch(s, snap({ address: "0xdead", workspace: "2", title: "GitHub" })).state
+  s = M.pushPark(s, snap({ address: "0x2", workspace: "1" }), 1000000).state
+  const reopen = s.undo[1]
+  assert.strictEqual(reopen.type, "relaunch")
+  assert.strictEqual(reopen.address, "")
+  // Sequence lookup finds the Reopen even after a sweep removes the park above it.
+  const seq = reopen.sequence
+  assert.strictEqual(M.findBySequence(s, seq), 1)
+  const expired = M.expireParked(s, 2000000, 10)
+  // Only parks expire; the Reopen survives and shifts down.
+  assert.strictEqual(expired.expired.length, 2)
+  assert.strictEqual(expired.state.undo.length, 1)
+  assert.strictEqual(expired.state.undo[0].type, "relaunch")
+  assert.strictEqual(M.findBySequence(expired.state, seq), 0)
+  // Restoring by sequence yields a relaunch effect, not the wrong window.
+  const u = M.undoAt(expired.state, M.findBySequence(expired.state, seq), {})
+  assert.strictEqual(u.effects[0].type, "relaunch")
+  // Forgetting by sequence drops only that entry.
+  let t = M.createState()
+  t = M.pushRelaunch(t, snap({ workspace: "2", title: "A" })).state
+  t = M.pushRelaunch(t, snap({ workspace: "2", title: "B" })).state
+  const dropSeq = t.undo[0].sequence
+  t = M.removeBySequence(t, dropSeq)
+  assert.strictEqual(t.undo.length, 1)
+  assert.strictEqual(t.undo[0].label, "B")
+  assert.strictEqual(M.findBySequence(t, dropSeq), -1)
+})
+
 console.log("ReprieveModel tests passed (" + passed + ")")

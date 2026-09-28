@@ -955,6 +955,27 @@ Item {
     return root.restoreAt(index, here === true)
   }
 
+  // Reopen rows are address-less: resolve by stable sequence so a timeout
+  // sweep expiring a parked entry above cannot shift the click onto the
+  // wrong window.
+  function restoreBySequence(sequence, here) {
+    var index = Model.findBySequence(root.model, sequence)
+    if (index === -1) { root.lastResult = "empty"; return "empty" }
+    return root.restoreAt(index, here === true)
+  }
+
+  // Forget a single Reopen entry. Park rows keep the two-step closeParked
+  // path so live windows and media cleanup are handled there.
+  function forgetReopen(sequence) {
+    var index = Model.findBySequence(root.model, sequence)
+    if (index === -1) { root.lastResult = "empty"; return "empty" }
+    var action = root.model.undo[index]
+    if (action && action.type === "park") { root.lastResult = "empty"; return "empty" }
+    root.commit(Model.removeBySequence(root.model, sequence))
+    root.lastResult = "forgot"
+    return "forgot"
+  }
+
   function openSetup() {
     try {
       if (root.shell && typeof root.shell.summon === "function")
@@ -1378,6 +1399,29 @@ Item {
       var here = false
       try { var parsed = JSON.parse(arg || "{}"); if (parsed && parsed.address) { address = parsed.address; here = parsed.here === true } } catch (e) {}
       return root.restoreAddress(address, here)
+    }
+    function restoreBySequence(arg: string): string {
+      var sequence = 0
+      var here = false
+      try {
+        var parsed = JSON.parse(arg || "{}")
+        sequence = Number(parsed.sequence)
+        here = parsed.here === true
+      } catch (e) {
+        sequence = Number(arg)
+      }
+      return root.restoreBySequence(sequence, here)
+    }
+    function forgetReopen(arg: string): string {
+      var sequence = 0
+      try {
+        var parsed = JSON.parse(arg || "{}")
+        sequence = Number(parsed.sequence)
+        if (!isFinite(sequence)) sequence = Number(arg)
+      } catch (e) {
+        sequence = Number(arg)
+      }
+      return root.forgetReopen(sequence)
     }
     function closeParked(address: string): string { return root.closeParked(address) }
     function clear(): string { return root.clearHistory() }

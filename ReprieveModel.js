@@ -219,9 +219,15 @@ function parkAction(snapshot, sequence, parkedAt) {
 
 function relaunchAction(snapshot, sequence) {
   var klass = sanitizeClass(snapshot.class)
+  // Reopen entries relaunch the app (browser / PWA) rather than moving a
+  // live window, so a Hyprland address is meaningless here. The window is
+  // already gone and its address may later be reused by an unrelated
+  // window; storing it would let Panel resolve restores against the wrong
+  // entry and risks confusion with live parked windows. Keep Reopen
+  // address-less like converted dead windows (markDead / reconcile).
   return {
     type: "relaunch",
-    address: normalizeAddress(snapshot.address),
+    address: "",
     workspace: normalizeWorkspace(snapshot.workspace),
     class: klass,
     title: sanitizeLabel(snapshot.title || klass || "window", LABEL_MAX),
@@ -441,6 +447,30 @@ function findParked(state, address) {
     if (undo[i] && undo[i].type === "park" && undo[i].address === addr) return i
   }
   return -1
+}
+
+// Stable identity for timeline rows. Park rows resolve by live address
+// (sweep-safe); Reopen rows are address-less, so they resolve by sequence,
+// which survives timeout sweeps that remove entries above them.
+function findBySequence(state, sequence) {
+  var seq = Number(sequence)
+  if (!isFinite(seq)) return -1
+  var undo = (state && state.undo) || []
+  for (var i = 0; i < undo.length; i++) {
+    if (undo[i] && Number(undo[i].sequence) === seq) return i
+  }
+  return -1
+}
+
+// Forget a single timeline entry (used for Reopen rows, which have no live
+// window to close). Park rows keep using closeParked/dropAddress so media
+// cleanup still runs.
+function removeBySequence(state, sequence) {
+  var seq = Number(sequence)
+  if (!isFinite(seq) || !state) return state
+  var next = cloneState(state)
+  next.undo = (next.undo || []).filter(function (a) { return !(a && Number(a.sequence) === seq) })
+  return next
 }
 
 function attachMedia(state, address, media) {
@@ -884,6 +914,8 @@ if (typeof module !== "undefined") {
     attachMedia: attachMedia,
     parkedAddresses: parkedAddresses,
     findParked: findParked,
+    findBySequence: findBySequence,
+    removeBySequence: removeBySequence,
     dropAddress: dropAddress,
     markDead: markDead,
     expireParked: expireParked,
