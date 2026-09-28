@@ -1,14 +1,13 @@
 # Reprieve 1.2.0 qualification
 
 Release base: `main` at 1.2.0 (includes `parkTimeout`, timeline countdown,
-doctor/bar surfacing, audit fixes). Offline suite green on greyarch
-(node 26 / python 3.14): 36 model, 10 journal, 18 binding, 8 media tests;
+doctor/bar surfacing, audit fixes). Offline suite green: 36 model, 10 journal,
+18 binding, 8 media tests;
 `py_compile`, `bash -n`, `check_namespace.sh`, `omarchy plugin validate` clean.
 
 ## Live matrix — PASS 40/40, 0 failures
 
-Run 2026-09-16 on greyarch (Omarchy 4 / Hyprland 0.56 session
-`efb5099…`, deployed via `.sync.sh` + shell restart): full
+Run 2026-09-16 after deployment and a shell restart: full
 `tests/live/acceptance.sh`, including the new block 20:
 
 - 20 timeout value reported in status — PASS

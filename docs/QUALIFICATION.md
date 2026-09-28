@@ -9,9 +9,7 @@ acceptance expectations preserve mixer mute. See the separate
 | | |
 | --- | --- |
 | Date | 2026-09-11 |
-| Machine | greyarch (Omarchy 4.0.3-1, shell `4.0.0.alpha`) |
-| Hyprland | 0.56.2 (`efb50993`), Lua config |
-| Quickshell | 0.3.1 |
+| Environment | Omarchy 4, Hyprland 0.56, Quickshell 0.3 |
 | Reprieve code under test | the `v1.0.0` tag (product files byte-identical to the tree the matrix ran on; only `tests/live/acceptance.sh` cleanup and this document were touched afterwards) |
 | Install method | `omarchy plugin add https://github.com/GreyforgeLabs/reprieve.git --enable --yes` on a machine with no prior Reprieve state |
 | Automated matrix | `tests/live/acceptance.sh` — **33 passed, 0 failed** (full mode, two `omarchy restart shell` cycles) |

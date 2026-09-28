@@ -225,7 +225,7 @@ reprieve doctor          Read-only health report
 Reprieve Doctor
 
 Hyprland         OK
-Session          efb50993780079460b0cbe…
+Session          example-session…
 Plugin           OK
 Journal          OK
 Parked windows   2

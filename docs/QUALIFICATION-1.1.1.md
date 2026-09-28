@@ -1,7 +1,6 @@
 # Reprieve 1.1.1 qualification
 
-Date: 2026-09-13. Machine: greyarch, Omarchy shell `4.0.0.alpha`, Hyprland
-0.56.2, PipeWire 1.6.8. Release base: v1.1.0. The installed candidate was
+Date: 2026-09-13. Release base: v1.1.0. The installed candidate was
 commit `8b69f1d`; subsequent release commits change tests, documentation, and
 tag CI only. Runtime files and the 1.1.1 manifest are unchanged from the
 candidate used for the live checks.

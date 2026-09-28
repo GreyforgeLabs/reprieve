@@ -29,7 +29,7 @@ function snap(extra) {
   }, extra || {})
 }
 
-const SESSION = "efb5099_1788996183_413474032"
+const SESSION = "example-session-1"
 
 // --------------------------------------------------------------- sanitizing
 
