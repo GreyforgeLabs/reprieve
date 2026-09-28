@@ -11,11 +11,12 @@ trap 'rm -rf "$STUB"' EXIT
 
 cat > "$STUB/omarchy-shell" <<'EOF'
 #!/usr/bin/env bash
-# STUB_MODE: parked | passthrough | empty | slow | down
+# STUB_MODE: parked | passthrough | empty | noactive | slow | down
 case "${STUB_MODE:-}" in
   parked)      echo "parked" ;;
   passthrough) echo "passthrough" ;;
   empty)       true ;;
+  noactive)    echo "empty" ;;
   slow)        sleep 5 ;;
   down)        exit 1 ;;
   *)           echo "bad stub mode" >&2; exit 2 ;;
@@ -50,6 +51,7 @@ STUB_MODE=down;        check "dead shell still degrades to close" 1 park
 STUB_MODE=empty;       check "empty success output degrades to close" 1 park
 STUB_MODE=slow;        check "timed-out park never closes (the safety net holds)" 0 park
 STUB_MODE=down;        check "close action still closes when shell is down" 1 close
+STUB_MODE=noactive;    check "close falls back when plugin has no active toplevel" 1 close
 
 echo "wrapper: passed $pass, failed $fail"
 [[ $fail -eq 0 ]]
