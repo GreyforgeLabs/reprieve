@@ -138,7 +138,7 @@ case "$ACTION" in
   close|kill|permanent)
     result="$(ipc close)"
     case "$result" in
-      closed|empty) exit 0 ;;
+      closed) exit 0 ;;
       *) hypr_close_active; exit 0 ;;
     esac
     ;;
