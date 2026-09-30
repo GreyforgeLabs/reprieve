@@ -55,6 +55,15 @@ def main() -> int:
     if not plugin_ok:
         problems.append(f"plugin not answering; enable it with: omarchy plugin enable {PLUGIN_ID}")
 
+    if plugin_ok:
+        flight = status.get("flight") or {}
+        mode = str(flight.get("mode") or "off")
+        renderer_ok = mode == "off" or (bool(flight.get("handler")) and bool(flight.get("screens")))
+        detail = "off" if mode == "off" else mode + (" (renderer ready)" if renderer_ok else " (renderer unavailable)")
+        rows.append(("Flight", detail, renderer_ok))
+        if not renderer_ok:
+            problems.append("flight effects are enabled but their renderer has no screen; reload the shell: omarchy restart shell")
+
     # Journal
     rc, out = run([os.path.join(HERE, "reprieve-journal"), "inspect"])
     journal = load_json(out) if rc == 0 else None

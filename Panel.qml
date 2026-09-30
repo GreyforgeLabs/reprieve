@@ -871,7 +871,9 @@ Item {
           border.color: Qt.rgba(root.brandCyan.r, root.brandCyan.g, root.brandCyan.b, 0.35)
           Text {
             id: noticeText
-            anchors.fill: parent
+            // The card derives its height from this text; anchoring the text's
+            // bottom back to the card creates a height binding loop.
+            anchors { left: parent.left; right: parent.right; top: parent.top }
             anchors.margins: Style.space(6)
             wrapMode: Text.WordWrap
             text: service ? String(service.recoveryNotice || "") : ""

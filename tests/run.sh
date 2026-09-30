@@ -7,9 +7,12 @@ cd "$(dirname "$0")/.."
 # py_compile leaves bin/__pycache__ behind (git-ignored, but local clutter).
 trap 'rm -rf bin/__pycache__' EXIT
 node tests/test_model.js
+node tests/test_service.js
+node tests/test_flight.js
 python3 tests/test_journal.py
 python3 tests/test_binds.py
 python3 tests/test_media.py
+python3 tests/test_doctor.py
 python3 -m py_compile bin/reprieve-journal.py bin/reprieve-binds bin/reprieve-doctor bin/reprieve-media
 bash -n bin/reprieve
 bash tests/test_wrapper.sh

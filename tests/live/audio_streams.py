@@ -95,7 +95,9 @@ def main():
             assert payload == {'muted': [], 'paused': []}, payload
             current = wait_stream()
             assert current['mute'] == original['mute'] is False
-            assert current['volume'] == original['volume'] and current['sink'] == original['sink']
+            assert current['volume'] == original['volume'] and current['sink'] == original['sink'], {
+                'before': {k: original[k] for k in ('volume', 'sink', 'mute')},
+                'after': {k: current[k] for k in ('volume', 'sink', 'mute')}}
             first.terminate()
             first.wait(timeout=3)
             start_stream()

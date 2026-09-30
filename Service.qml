@@ -82,6 +82,11 @@ Item {
   property var barAnchors: ({})
   property var pendingFlights: ({})
   property int flightSequence: 0
+  property string lastFlightSkip: ""
+  property string lastParkRead: ""
+  property var parkReadQueue: []
+  property string currentParkRead: ""
+
 
   function setBarAnchor(screen, x, y, size) {
     var name = String(screen || "")
@@ -105,7 +110,7 @@ Item {
   // the window's geometry from Hyprland; a restore asks the overlay for the
   // place it remembers from the park (the live geometry is the park
   // workspace's).
-  function flightJob(kind, handle, address) {
+  function flightJob(kind, handle, address, freshIpc) {
     if (root.flight === "off" || !root.flightHandler || !handle) return null
     var addr = Model.normalizeAddress(address)
     var job = { token: "f" + (++root.flightSequence), kind: kind, mode: root.flight, address: addr, handle: handle }
@@ -117,20 +122,18 @@ Item {
       job.rect = mem.rect
       return job
     }
-    var ipc = handle.lastIpcObject || {}
+    var ipc = freshIpc || handle.lastIpcObject || {}
     var at = ipc.at, size = ipc.size
     if (!at || !size || at.length < 2 || size.length < 2) return null
     var mon = root.monitorFor(ipc.monitor)
     if (!mon || !mon.name) return null
-    var scale = Number(mon.scale) || 1
     job.screen = String(mon.name)
-    // hyprctl reports layout pixels; the overlay draws in the screen's
-    // logical pixels
+    // Client geometry and monitor positions already use logical pixels.
     job.rect = {
-      x: Math.round((Number(at[0]) - Number(mon.x || 0)) / scale),
-      y: Math.round((Number(at[1]) - Number(mon.y || 0)) / scale),
-      w: Math.max(1, Math.round(Number(size[0]) / scale)),
-      h: Math.max(1, Math.round(Number(size[1]) / scale))
+      x: Math.round(Number(at[0]) - Number(mon.x || 0)),
+      y: Math.round(Number(at[1]) - Number(mon.y || 0)),
+      w: Math.max(1, Math.round(Number(size[0]))),
+      h: Math.max(1, Math.round(Number(size[1])))
     }
     return job
   }
@@ -140,7 +143,6 @@ Item {
     for (var k in root.pendingFlights) next[k] = root.pendingFlights[k]
     next[job.token] = { job: job, cut: cut, started: Date.now() }
     root.pendingFlights = next
-    flightWatchdog.restart()
     if (job.kind === "park") root.flightPark(job)
     else root.flightRestore(job)
   }
@@ -154,6 +156,23 @@ Item {
     root.pendingFlights = next
     try { pending.cut() } catch (e) { console.warn("reprieve: flight cut failed", e) }
     return "ok"
+  }
+
+  // Finish the previous visual and its real-window cut before changing the
+  // same window again. In particular, an early undo must never leave an old
+  // park callback able to hide the restored window later.
+  function settleFlights(address) {
+    var addr = Model.normalizeAddress(address)
+    if (!addr) return
+    try {
+      if (root.flightHandler && root.flightHandler.finishAddress)
+        root.flightHandler.finishAddress(addr)
+    } catch (e) { console.warn("reprieve: settling flight failed", e) }
+    var tokens = Object.keys(root.pendingFlights)
+    for (var i = 0; i < tokens.length; i++) {
+      var pending = root.pendingFlights[tokens[i]]
+      if (pending && pending.job.address === addr) root.flightCut(tokens[i])
+    }
   }
 
   function flightLanded(address) {
@@ -236,8 +255,9 @@ Item {
       nextTimeout = Model.restampParked(nextTimeout, Date.now())
     root.model = nextTimeout
     root.publish()
-    // No persist: the timeout lives in shell.json, not the journal.
-    // commit() inside the sweep persists when entries actually expire.
+    // shell.json owns the setting, but newly granted park timestamps must
+    // survive a shell reload as well as the in-memory grace interval.
+    if (was <= 0 && parkTimeout > 0) root.persist()
     if (parkTimeout > 0) root.sweepExpired()
   }
 
@@ -324,12 +344,15 @@ Item {
     try {
       if (!root.shell || typeof root.shell.updateEntryInline !== "function") return false
       var next = root.pluginEntry()
+      // Omarchy reports false for a write that changes nothing.
+      if (next[name] === value) return true
       next[name] = value
-      // Reflect immediately; the shell.json watcher confirms shortly after.
+      if (root.shell.updateEntryInline(root.pluginId, next) === false) return false
+      // Reflect accepted changes immediately; the watcher confirms shortly after.
       var local = {}
       for (var k in next) local[k] = next[k]
       root.settingsEntry = local
-      return root.shell.updateEntryInline(root.pluginId, next) !== false
+      return true
     } catch (e) {
       console.warn("reprieve: saveSetting failed", e)
       return false
@@ -581,6 +604,8 @@ Item {
     var ws = Model.normalizeWorkspace(workspace)
     if (!addr || !ws) return false
     root.expect(addr, "move")
+    // Own dispatches precede Quickshell's cached workspace refresh.
+    root.patchSnapshot(addr, { workspace: ws, workspaceKnown: true })
     root.setNoAnim(addr, true)
     root.hyprDispatch(
       'hl.dsp.window.move({ ' + root.windowSel(addr) + ', workspace = "' + ws + '", follow = false })')
@@ -612,6 +637,7 @@ Item {
   }
 
   function closeWindow(address) {
+    root.settleFlights(address)
     var addr = Model.normalizeAddress(address)
     if (!addr) return
     root.expect(addr, "close")
@@ -649,7 +675,7 @@ Item {
       address: address,
       class: String(ipc.class || cached.class || ""),
       title: String(handle.title || ipc.title || cached.title || ""),
-      workspace: root.workspaceName(handle.workspace) || ipcWs || cached.workspace || "",
+      workspace: cached.workspaceKnown ? cached.workspace : (root.workspaceName(handle.workspace) || ipcWs || cached.workspace || ""),
       floating: cached.floatingKnown ? !!cached.floating : (ipc.floating !== undefined ? !!ipc.floating : !!cached.floating),
       fullscreen: Number(ipc.fullscreen !== undefined ? ipc.fullscreen : (cached.fullscreen || 0)),
       fullscreenClient: Number(ipc.fullscreenClient !== undefined ? ipc.fullscreenClient : (cached.fullscreenClient || 0)),
@@ -658,9 +684,21 @@ Item {
     }
   }
 
+  function activeHandle() {
+    try {
+      if (Hyprland.activeToplevel) return Hyprland.activeToplevel
+      // The compositor focus object can be null at startup or between focus
+      // events. The Wayland activated flag is current from the first frame.
+      var list = Hyprland.toplevels ? (Hyprland.toplevels.values || []) : []
+      for (var i = 0; i < list.length; i++) {
+        if (list[i] && list[i].wayland && list[i].wayland.activated) return list[i]
+      }
+    } catch (e) {}
+    return null
+  }
+
   function activeSnapshot() {
-    var handle = null
-    try { handle = Hyprland.activeToplevel } catch (e) {}
+    var handle = root.activeHandle()
     return handle ? root.snapshotFromHandle(handle) : null
   }
 
@@ -676,6 +714,7 @@ Item {
         // changefloatingmode events keep the cache current between IPC
         // refreshes; snapshotFromHandle already preferred that value.
         if (previous && previous.floatingKnown) snap.floatingKnown = true
+        if (previous && previous.workspaceKnown) snap.workspaceKnown = true
         next[snap.address] = snap
       }
     } catch (e) {}
@@ -791,9 +830,9 @@ Item {
       var effect = effects[i]
       if (!effect) continue
       if (effect.type === "park") {
-        if (!root.liveHandle(effect.address)) continue
-        root.moveSilent(effect.address, effect.workspace)
-        root.requestPause({ address: effect.address, pid: effect.pid, class: effect.class })
+        var handle = root.liveHandle(effect.address)
+        if (!handle) continue
+        root.animatePark(root.snapshotFromHandle(handle), handle)
       } else if (effect.type === "restore") {
         root.restoreWindow(effect, opts.focus !== false)
       } else if (effect.type === "relaunch") {
@@ -806,6 +845,7 @@ Item {
   }
 
   function restoreWindow(effect, focus) {
+    root.settleFlights(effect.address)
     if (!root.liveHandle(effect.address)) {
       root.relaunch(effect)
       return false
@@ -853,8 +893,7 @@ Item {
   // -------------------------------------------------------------- actions
 
   function parkActive() {
-    var handle = null
-    try { handle = Hyprland.activeToplevel } catch (e) {}
+    var handle = root.activeHandle()
     if (!handle) { root.lastResult = "empty"; return "empty" }
     return root.parkWindow(handle.address)
   }
@@ -863,34 +902,80 @@ Item {
   function parkWindow(address) {
     var handle = root.liveHandle(address)
     if (!handle) { root.lastResult = "empty"; return "empty" }
-    var snapshot = root.snapshotFromHandle(handle)
-    // Focus routinely lingers on the window just parked (Hyprland keeps it
-    // focused until something else takes focus; with a single window there
-    // is nothing else). A second Super+W in that state targets our own
-    // hidden window: no-op instead of "passthrough", because the keybind
-    // wrapper turns anything but parked|empty into a real close.
-    if (snapshot.workspace === root.parkWorkspace
-        && Model.findParked(root.model, snapshot.address) !== -1) {
+    // A tracked park is already owned, even before its cut has run.
+    if (Model.findParked(root.model, handle.address) !== -1) {
       root.lastResult = "empty"
       return "empty"
     }
+    root.settleFlights(handle.address)
+    var snapshot = root.snapshotFromHandle(handle)
     var previous = root.model
     var result = Model.pushPark(previous, snapshot)
     if (result.reason !== "parked") { root.lastResult = "passthrough"; return "passthrough" }
     root.commit(result.state)
     root.applyKills(result.kills, previous)
-    var cut = function() {
-      if (snapshot.fullscreen > 0) root.setFullscreen(snapshot.address, 0, 0)
-      root.moveSilent(snapshot.address, root.parkWorkspace)
-      root.requestPause(snapshot)
-    }
-    var job = root.flightJob("park", handle, snapshot.address)
-    if (job) root.beginFlight(job, cut)
-    else cut()
+    root.animatePark(snapshot, handle)
     root.lastResult = "parked"
     root.toast("Parked " + Model.toastLabel(result.action) + " — Super+Z to undo")
     root.windowParked(snapshot.address)
     return "parked"
+  }
+
+  function animatePark(snapshot, handle) {
+    root.settleFlights(snapshot.address)
+    var cut = function() {
+      if (snapshot.fullscreen > 0 || snapshot.fullscreenClient > 0)
+        root.setFullscreen(snapshot.address, 0, 0)
+      root.moveSilent(snapshot.address, root.parkWorkspace)
+      root.requestPause(snapshot)
+    }
+    if (root.flight === "off" || !root.flightHandler) { cut(); return }
+    // lastIpcObject does not track live drag/resize geometry. Reserve the cut
+    // now (so early undo can settle it), and read fresh geometry before drawing.
+    var token = "f" + (++root.flightSequence)
+    var next = Object.assign({}, root.pendingFlights)
+    next[token] = { job: { token: token, kind: "park", address: snapshot.address }, cut: cut, started: Date.now() }
+    root.pendingFlights = next
+    root.parkReadQueue = root.parkReadQueue.concat([token])
+    root.pumpParkReads()
+  }
+
+  function pumpParkReads() {
+    if (parkGeometryReader.running) return
+    while (root.parkReadQueue.length) {
+      var token = root.parkReadQueue[0]
+      root.parkReadQueue = root.parkReadQueue.slice(1)
+      if (!root.pendingFlights[token]) continue
+      root.currentParkRead = token
+      parkGeometryReader.command = ["hyprctl", "-j", "clients"]
+      parkGeometryReader.running = true
+      return
+    }
+  }
+
+  function finishParkRead(token, text, code) {
+    var pending = root.pendingFlights[token]
+    if (!pending) return // settled by undo/close while the read was running
+    var clients = []
+    if (code === 0) {
+      try { clients = JSON.parse(String(text || "").slice(0, 1048576)) } catch (e) {}
+    }
+    var addr = pending.job.address
+    var ipc = null
+    for (var i = 0; i < clients.length; i++) {
+      if (Model.normalizeAddress(clients[i].address) === addr) { ipc = clients[i]; break }
+    }
+    var handle = root.liveHandle(addr)
+    var job = ipc ? root.flightJob("park", handle, addr, ipc) : null
+    root.lastParkRead = "code=" + code + ", clients=" + clients.length + ", found=" + !!ipc
+    if (!job || !root.flightHandler.wants(job)) {
+      root.lastFlightSkip = !job ? "geometry unavailable" : "screen unavailable: " + job.screen
+      root.flightCut(token)
+      return
+    }
+    root.lastFlightSkip = ""
+    job.token = token
+    root.beginFlight(job, pending.cut)
   }
 
   function closeActive() {
@@ -1185,7 +1270,7 @@ Item {
     summary.entry = root.entryLocation
     summary.bar = { placed: root.entryLocation === "bar", show: root.showInBar, tray: root.barTray, hideWhenIdle: root.hideBarWhenIdle, maxIcons: root.barMaxIcons }
     summary.journal = root.journalStatus
-    summary.flight = { mode: root.flight, handler: !!root.flightHandler, pending: Object.keys(root.pendingFlights).length, flown: root.flightHandler ? Number(root.flightHandler.flown || 0) : 0, anchors: root.barAnchors }
+    summary.flight = { frames: root.flightHandler ? Object.keys(root.flightHandler.memory).length : 0, lastSkip: root.lastFlightSkip, lastRead: root.lastParkRead, screens: root.flightHandler ? Object.keys(root.flightHandler.containers) : [], active: root.flightHandler ? root.flightHandler.activeCount : 0, mode: root.flight, handler: !!root.flightHandler, pending: Object.keys(root.pendingFlights).length, flown: root.flightHandler ? Number(root.flightHandler.flown || 0) : 0, anchors: root.barAnchors }
     summary.session = root.session ? root.session.slice(0, 12) : ""
     summary.binds = root.bindsStatus ? !!root.bindsStatus.installed : null
     summary.parkTimeout = root.parkTimeout
@@ -1246,6 +1331,24 @@ Item {
     onLoaded: root.reloadSettings()
     onFileChanged: { shellConfigFile.reload(); root.reloadSettings() }
     onLoadFailed: root.reloadSettings()
+  }
+
+  Timer {
+    id: parkGeometryTimeout
+    interval: 350
+    onTriggered: if (parkGeometryReader.running) parkGeometryReader.running = false
+  }
+  Process {
+    id: parkGeometryReader
+    running: false
+    stdout: StdioCollector { id: parkGeometryOut; waitForEnd: true }
+    onRunningChanged: { if (running) parkGeometryTimeout.restart(); else parkGeometryTimeout.stop() }
+    onExited: function(code) {
+      var token = root.currentParkRead
+      root.currentParkRead = ""
+      root.finishParkRead(token, parkGeometryOut.text, code)
+      root.pumpParkReads()
+    }
   }
 
   Process {
@@ -1357,7 +1460,7 @@ Item {
       } else if (name === "movewindowv2") {
         var mv = data.split(",")
         root.handleMove(mv[0], mv.slice(2).join(","))
-        root.patchSnapshot(mv[0], { workspace: mv.slice(2).join(",") })
+        root.patchSnapshot(mv[0], { workspace: mv.slice(2).join(","), workspaceKnown: true })
       } else if (name === "changefloatingmode") {
         var fl = data.split(",")
         root.patchSnapshot(fl[0], { floating: fl[1] === "1", floatingKnown: true })

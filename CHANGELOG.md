@@ -2,6 +2,33 @@
 
 All notable changes to Reprieve. Versions follow SemVer.
 
+## [1.5.2] — 2026-09-30
+
+### Fixed
+- Duplicate parks during a flight are idempotent. Early undo, close and re-park
+  finish the previous cut before starting another operation on that window.
+- Redo follows the configured flight effect and clears fullscreen before parking.
+- Flight capture reads current compositor geometry after drag/resize. Logical
+  coordinates are no longer divided by monitor scale twice.
+- The angel remains visible through lift; snapshot pruning preserves active
+  flights and releases orphaned frames after landing.
+- Parking uses the Wayland activation flag when the compositor focus object is
+  temporarily unavailable. Own moves remain authoritative while IPC catches up.
+- Newly granted timeout grace is journaled. Setting an unchanged value succeeds;
+  rejected writes keep the last accepted local settings.
+- Recovery-notice text no longer creates a height binding loop.
+
+### Diagnostics and verification
+- Status includes renderer screens, active scenes, cached frames and the last
+  geometry-read/fallback result. Doctor fails when enabled effects have no renderer.
+- Service/lifecycle regressions and scoped live motion/timer qualification are
+  documented in `docs/BUG-HUNT-2026-09-30.md`.
+- The companion control-panel fix yields Super+W to Reprieve's installed managed
+  binding, including forced calls and older preferences without ownership.
+  It is published separately in
+  [Control Panel PR #1](https://github.com/avillagran/omarchy-control-panel/pull/1);
+  it is not bundled into Reprieve. README documents the interim workaround.
+
 ## [1.5.1] – 2026-09-28
 
 ### Fixed

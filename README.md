@@ -310,6 +310,13 @@ Reporting: see [SECURITY.md](SECURITY.md).
 
 ## When something looks wrong
 
+Older Omarchy Control Panel versions can overwrite Reprieve's `Super+W`
+binding from their five-second watchdog. The
+[companion ownership fix](https://github.com/avillagran/omarchy-control-panel/pull/1)
+is proposed upstream. Until an affected installation includes it, disabling
+Control Panel with `omarchy plugin disable io.github.avillagran.omarchy-control-panel`
+and then running `hyprctl reload` lets Reprieve's installed binding stay active.
+
 | Symptom                                       | What to do                                                                 |
 | --------------------------------------------- | -------------------------------------------------------------------------- |
 | `Super+W` still terminates windows            | `reprieve doctor`. "installed, not live" → `hyprctl reload`; "not installed" → `reprieve setup` |
@@ -332,3 +339,22 @@ Omarchy's default close.
 ## License
 
 MIT — © 2026 Greyforge Labs. See [LICENSE](LICENSE).
+
+### Working on a local installation
+
+On the installed Omarchy version, Reprieve's `keepLoaded` service survives a
+plugin rescan. Saving QML or running `omarchy-shell shell rescanPlugins` can
+reload the overlay while retaining the previous service code and cached QML.
+Use `omarchy restart shell` after changing the service, then verify
+`reprieve status` and `reprieve doctor`. The recovery journal restores parked
+windows; the in-memory captured frames are recreated by subsequent parks.
+
+`python3 tests/live/focused.py` creates and cleans up its own test windows,
+checks rapid operations and fullscreen, temporarily sets a five-second timeout,
+and saves park/restore screenshots. It refuses to change settings while user
+windows are parked and restores effective settings afterwards. Set
+`REPRIEVE_TEST_ARTIFACTS` to choose the capture directory. Add
+`REPRIEVE_TEST_SHORTCUT=1` to exercise the actual Super+W command wrapper;
+this uses window focus and should run while the desktop is otherwise idle.
+See [the September 30 bug-hunt record](docs/BUG-HUNT-2026-09-30.md) for
+verification scope and retained evidence.

@@ -31,11 +31,15 @@ Item {
   // address -> { view, rect, screen }
   property var memory: ({})
   property var containers: ({})   // screen name -> scene container item
+  property var scenes: ({})
   property int activeCount: 0
   property int flown: 0           // flights completed since the shell started
 
   onServiceChanged: if (service) service.flightHandler = root
   Component.onCompleted: if (service) service.flightHandler = root
+  Component.onDestruction: {
+    if (service && service.flightHandler === root) service.flightHandler = null
+  }
 
   // ---- handler API, called by the service
 
@@ -92,13 +96,28 @@ Item {
     }
     var scene = sceneComponent.createObject(container, { job: job, frame: view })
     if (!scene) { if (service) service.flightCut(job.token); return }
+    var next = Object.assign({}, root.scenes)
+    next[job.token] = scene
+    root.scenes = next
     root.activeCount++
   }
 
+  function finishAddress(address) {
+    var tokens = Object.keys(root.scenes)
+    for (var i = 0; i < tokens.length; i++) {
+      var scene = root.scenes[tokens[i]]
+      if (scene && scene.job.address === String(address)) scene.finish()
+    }
+  }
+
   function sceneDone(scene) {
+    var next = Object.assign({}, root.scenes)
+    delete next[scene.job.token]
+    root.scenes = next
     root.activeCount = Math.max(0, root.activeCount - 1)
     root.flown++
     scene.destroy()
+    Qt.callLater(root.prune)
   }
 
   Connections {
@@ -114,6 +133,11 @@ Item {
   function prune() {
     if (!root.service) return
     var keep = {}
+    // reset/restore-all can remove history while a restore still owns its frame.
+    for (var token in root.scenes) {
+      var scene = root.scenes[token]
+      if (scene && scene.job) keep[scene.job.address] = true
+    }
     var lists = [root.service.undoStack || [], root.service.redoStack || []]
     for (var l = 0; l < 2; l++) for (var i = 0; i < lists[l].length; i++) if (lists[l][i] && lists[l][i].address) keep[lists[l][i].address] = true
     for (var k in root.memory) if (!keep[k]) root.forget(k)
@@ -197,6 +221,8 @@ Item {
       property real t: 0
       property bool cutDone: false
       property bool captured: false
+      property bool finished: false
+      property bool frameReleased: false
       readonly property bool hasImage: !!frame
       property var trail: []
 
@@ -275,7 +301,7 @@ Item {
         if (!angel) return { x: p.x, y: p.y, o: 0 }
         if (park) {
           if (t < 0.36) { var u = ease(span(0, 0.36)); p = swoopPath(u); o = easeOut(span(0, 0.1)) }
-          else if (t < 0.5) { p = above({ x: snap.x, y: snap.y }, snap.s) }
+          else if (t < 0.5) { p = above({ x: snap.x, y: snap.y }, snap.s); o = 1 }
           else { p = above({ x: snap.x, y: snap.y }, snap.s); o = 1 - easeIn(span(0.88, 1)) }
         } else {
           if (t < 0.7) { p = above({ x: snap.x, y: snap.y }, snap.s); o = easeOut(span(0, 0.12)) }
@@ -292,8 +318,26 @@ Item {
         if (root.service) root.service.flightCut(job.token)
       }
 
+      function releaseFrame() {
+        if (frameReleased) return
+        frameReleased = true
+        if (!frame) return
+        var container = root.containers[job.screen]
+        if (park && container) {
+          frame.anchors.fill = undefined
+          frame.parent = container.vault
+          root.remember(job.address, { view: frame, rect: rect, screen: job.screen })
+        } else root.forget(job.address)
+      }
+
       function finish() {
+        if (finished) return
+        finished = true
+        flight.stop()
+        mapSettle.stop()
+        captureTimeout.stop()
         cut()
+        releaseFrame()
         if ((park || angel) && root.service) root.service.flightLanded(job.address)
         root.sceneDone(scene)
       }
@@ -331,17 +375,7 @@ Item {
           else captureTimeout.start()
         } else startFlight()
       }
-      Component.onDestruction: {
-        if (!frame) return
-        var container = root.containers[job.screen]
-        if (park && container) {
-          frame.anchors.fill = undefined
-          frame.parent = container.vault
-          root.remember(job.address, { view: frame, rect: rect, screen: job.screen })
-        } else {
-          root.forget(job.address)
-        }
-      }
+      Component.onDestruction: releaseFrame()
       Connections {
         target: scene.frame
         ignoreUnknownSignals: true
