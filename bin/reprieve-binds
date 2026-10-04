@@ -267,6 +267,9 @@ def render_block(keys: dict[str, str], unbind: list[str]) -> str:
                 f'o.bind("{keys[action]}", "{DESCRIPTIONS[action]}", hl.dsp.global("{PLUGIN_ID}:{action}"))'
             )
     lines.append('hl.window_rule({ match = { workspace = "special:reprieve" }, no_anim = true })')
+    # Closing a layer-shell panel must not return focus to a parked window.
+    # Restore moves the window to its home workspace before focusing it.
+    lines.append('hl.window_rule({ match = { workspace = "special:reprieve" }, no_focus = true })')
     lines.append('hl.layer_rule({ match = { namespace = "reprieve" }, no_anim = true, animation = "none" })')
     lines.append('hl.layer_rule({ match = { namespace = "reprieve-toast" }, no_anim = true, animation = "none" })')
     lines.append(END)

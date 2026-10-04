@@ -78,6 +78,12 @@ choose `R`.
 Bring the card back any time with `reprieve setup`. Press `L` on it to opt
 out permanently.
 
+After upgrading from 1.5.2 or earlier, open `reprieve setup` and choose
+**Reinstall keybindings** to add the parked-window focus rule to your managed
+block. This keeps parked windows hidden when a bar panel closes on an empty
+workspace. Updating the plugin alone does not rewrite your bindings. Existing
+shortcut conflicts still go through the setup card's normal choices.
+
 ## Restore, not relaunch
 
 Two outcomes exist in the timeline, and Reprieve is careful to tell them apart:

@@ -94,6 +94,27 @@ class BindTests(unittest.TestCase):
         self.assertTrue(self.config.read_text().startswith(BEGIN))
         self.assertIsNone(out["backup"])
 
+    def test_install_upgrades_parked_focus_rule_without_touching_user_rules(self):
+        focus_rule = 'hl.window_rule({ match = { workspace = "special:reprieve" }, no_focus = true })'
+        self.config.write_text(USER_CONFIG)
+        rc, out = run("install", config=self.config, home=self.home)
+        self.assertEqual(rc, 0, out)
+        self.assertIn(focus_rule, block_of(self.config.read_text()))
+        # Simulate an installed block from before the parked-focus fix.
+        legacy = self.config.read_text().replace(focus_rule + "\n", "")
+        self.config.write_text(legacy)
+        rc, out = run("install", config=self.config, home=self.home)
+        self.assertEqual(rc, 0, out)
+        upgraded = self.config.read_text()
+        self.assertEqual(upgraded.count(focus_rule), 1)
+        self.assertTrue(upgraded.startswith(USER_CONFIG))
+        rc, out = run("install", config=self.config, home=self.home)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.config.read_text(), upgraded)
+        rc, out = run("remove", config=self.config, home=self.home)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.config.read_text(), USER_CONFIG)
+
     def test_idempotent_install(self):
         self.config.write_text(USER_CONFIG)
         run("install", config=self.config, home=self.home)
