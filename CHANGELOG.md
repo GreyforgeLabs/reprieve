@@ -2,6 +2,15 @@
 
 All notable changes to Reprieve. Versions follow SemVer.
 
+## Unreleased
+
+### Fixed
+- Parked windows cannot receive focus while on `special:reprieve`, preventing
+  a dismissed bar panel from making them visible again after the last window
+  is parked. Restoring moves the window out of that workspace before focusing it.
+- Existing installations need their managed bindings refreshed to add the rule;
+  see the upgrade note in the README.
+
 ## [1.5.2] — 2026-09-30
 
 ### Fixed
