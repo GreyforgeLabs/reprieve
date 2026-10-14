@@ -627,6 +627,17 @@ Item {
       'hl.dsp.window.float({ ' + root.windowSel(addr) + ', action = "' + (floating ? "enable" : "disable") + '" })')
   }
 
+  // A pinned window is fixed to its display: Hyprland silently no-ops a
+  // move to a special workspace, so park must unpin before hiding and the
+  // restore re-pins after floating is back (pin requires a floating window).
+  // window.pin parses "enable"/"disable"/"toggle" like window.float.
+  function setPinned(address, pinned) {
+    var addr = Model.normalizeAddress(address)
+    if (!addr) return
+    root.hyprDispatch(
+      'hl.dsp.window.pin({ ' + root.windowSel(addr) + ', action = "' + (pinned ? "enable" : "disable") + '" })')
+  }
+
   function setFullscreen(address, internal, client) {
     var addr = Model.normalizeAddress(address)
     if (!addr) return
@@ -683,6 +694,7 @@ Item {
       title: String(handle.title || ipc.title || cached.title || ""),
       workspace: cached.workspaceKnown ? cached.workspace : (root.workspaceName(handle.workspace) || ipcWs || cached.workspace || ""),
       floating: cached.floatingKnown ? !!cached.floating : (ipc.floating !== undefined ? !!ipc.floating : !!cached.floating),
+      pinned: !!ipc.pinned,
       fullscreen: Number(ipc.fullscreen !== undefined ? ipc.fullscreen : (cached.fullscreen || 0)),
       fullscreenClient: Number(ipc.fullscreenClient !== undefined ? ipc.fullscreenClient : (cached.fullscreenClient || 0)),
       pid: Number(ipc.pid || cached.pid || 0),
@@ -883,6 +895,7 @@ Item {
     var cut = function() {
       root.moveSilent(effect.address, workspace)
       root.setFloating(effect.address, !!effect.floating)
+      if (effect.pinned) root.setPinned(effect.address, true)
       if (effect.fullscreen > 0 || effect.fullscreenClient > 0)
         root.setFullscreen(effect.address, effect.fullscreen, effect.fullscreenClient)
       if (focus) root.focusWindow(effect.address)
@@ -957,14 +970,18 @@ Item {
     var cut = function() {
       if (snapshot.fullscreen > 0 || snapshot.fullscreenClient > 0)
         root.setFullscreen(snapshot.address, 0, 0)
+      if (snapshot.pinned) root.setPinned(snapshot.address, false)
       root.moveSilent(snapshot.address, root.parkWorkspace)
       root.requestPause(snapshot)
     }
-    if (root.flight === "off" || !root.flightHandler) { cut(); return }
+    // The cut always waits for the fresh geometry read below: lastIpcObject
+    // is only refreshed when toplevels are fetched, and a pinned window's
+    // move to the park workspace is a silent no-op — the unpin decision and
+    // the journal's pinned flag must come from the read, not the snapshot.
     // lastIpcObject does not track live drag/resize geometry. Reserve the cut
     // now (so early undo can settle it), and read fresh geometry before drawing.
     var token = "f" + (++root.flightSequence)
-    root.pendingFlights = Model.assoc(root.pendingFlights, token, { job: { token: token, kind: "park", address: snapshot.address }, cut: cut, started: Date.now() })
+    root.pendingFlights = Model.assoc(root.pendingFlights, token, { job: { token: token, kind: "park", address: snapshot.address }, cut: cut, snapshot: snapshot, started: Date.now() })
     root.parkReadQueue = root.parkReadQueue.concat([token])
     root.pumpParkReads()
   }
@@ -994,11 +1011,15 @@ Item {
     for (var i = 0; i < clients.length; i++) {
       if (Model.normalizeAddress(clients[i].address) === addr) { ipc = clients[i]; break }
     }
+    if (ipc) {
+      if (pending.snapshot) pending.snapshot.pinned = !!ipc.pinned
+      root.commit(Model.updatePinned(root.model, addr, !!ipc.pinned))
+    }
     var handle = root.liveHandle(addr)
     var job = ipc ? root.flightJob("park", handle, addr, ipc) : null
     root.lastParkRead = "code=" + code + ", clients=" + clients.length + ", found=" + !!ipc
-    if (!job || !root.flightHandler.wants(job)) {
-      root.lastFlightSkip = !job ? "geometry unavailable" : "screen unavailable: " + job.screen
+    if (root.flight === "off" || !job || !root.flightHandler || !root.flightHandler.wants(job)) {
+      root.lastFlightSkip = root.flight === "off" ? "" : (!job ? "geometry unavailable" : "screen unavailable: " + job.screen)
       root.flightCut(token)
       return
     }

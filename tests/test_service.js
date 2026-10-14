@@ -205,4 +205,29 @@ test("re-publishing an unchanged bar anchor keeps the same object", () => {
   assert.notEqual(root.barAnchors, first)
   assert.equal(root.barAnchors["DP-2"].x, 40)
 })
+test("parking a pinned window unpins before the move and restore re-pins after floating", () => {
+  const {root, handle, jobs, dispatches} = service()
+  handle.lastIpcObject.pinned = true
+  handle.lastIpcObject.floating = true
+  root.parkWindow("0xabc")
+  root.flightCut(jobs[0].token)
+  const pinOff = dispatches.findIndex(d => d.includes("window.pin") && d.includes("disable"))
+  const move = dispatches.findIndex(d => d.includes("window.move"))
+  assert.ok(pinOff >= 0, "park must unpin a pinned window")
+  assert.ok(pinOff < move, "the unpin must precede the move to the park workspace")
+  root.undoLast()
+  const floatOn = dispatches.findIndex(d => d.includes("window.float") && d.includes("enable"))
+  const pinOn = dispatches.findIndex(d => d.includes("window.pin") && d.includes("enable"))
+  assert.ok(pinOn > floatOn && floatOn > move, "the re-pin must follow the float restore (pin requires a floating window)")
+})
+test("parking with flight off still runs the geometry read before the cut", () => {
+  const {root, handle, dispatches} = service()
+  root.flight = "off"
+  handle.lastIpcObject.pinned = true
+  handle.lastIpcObject.floating = true
+  root.parkWindow("0xabc")
+  const pinOff = dispatches.findIndex(d => d.includes("window.pin") && d.includes("disable"))
+  const move = dispatches.findIndex(d => d.includes("window.move"))
+  assert.ok(pinOff >= 0 && pinOff < move, "the read-gated cut must still unpin with flight off")
+})
 if (failures) process.exit(1)
