@@ -161,6 +161,7 @@ class MediaTests(unittest.TestCase):
             tree.kill()
             subprocess.run(["kill", str(grandchild)], check=False)
             tree.wait()
+            tree.stdout.close()
 
     def test_run_respects_deadline(self):
         mod._deadline = 0

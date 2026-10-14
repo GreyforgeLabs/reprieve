@@ -376,13 +376,16 @@ function redo(state, nowOverride, live) {
     // Redo re-hides the window, starting a new hidden interval: restart
     // the clock instead of inheriting the stamp from the original park.
     var update = { parkedAt: nowMs(nowOverride) }
-    if (live && normalizeAddress(live.address) === action.address && canPark(live, next)) {
-      update.workspace = normalizeWorkspace(live.workspace)
+    // A live snapshot whose workspace is not known yet (or not a name the
+    // journal accepts) says nothing reliable: keep the recorded layout.
+    var liveWs = live ? normalizeWorkspace(live.workspace) : ""
+    if (liveWs && normalizeAddress(live.address) === action.address && canPark(live, next)) {
+      update.workspace = liveWs
       update.floating = !!live.floating
       update.fullscreen = clampInt(live.fullscreen, 0, 2, 0)
       update.fullscreenClient = clampInt(live.fullscreenClient, 0, 2, 0)
       // Its home is known now, even if it was first recovered without one.
-      if (update.workspace) update.recovered = false
+      update.recovered = false
     }
     action = Object.assign({}, action, update)
   }

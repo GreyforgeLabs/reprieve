@@ -708,6 +708,11 @@ test("redo parks the window's current layout, not its first park", () => {
   assert.strictEqual(M.redo(u.state, 1000).state.undo[0].workspace, "2")
   assert.strictEqual(M.redo(u.state, 1000, snap({ address: "0x2", workspace: "7" })).state.undo[0].workspace, "2")
   assert.strictEqual(M.redo(u.state, 1000, snap({ address: "0x1", workspace: "special:magic" })).state.undo[0].workspace, "2")
+  // A live window whose workspace is not known yet keeps the recorded
+  // layout instead of erasing its home.
+  const unknown = M.redo(u.state, 1000, snap({ address: "0x1", workspace: "", floating: true }))
+  assert.strictEqual(unknown.state.undo[0].workspace, "2")
+  assert.strictEqual(unknown.state.undo[0].floating, false)
   // A recovered window that was restored has a known home from then on.
   const rec = M.pushRecovered(M.createState(), { address: "0x3", class: "foot" }).state
   const ru = M.undoAt(rec, 0, { workspace: "4" })
