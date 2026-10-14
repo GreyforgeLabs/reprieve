@@ -91,10 +91,12 @@ Item {
   function setBarAnchor(screen, x, y, size) {
     var name = String(screen || "")
     if (!name) return
-    var next = {}
-    for (var k in root.barAnchors) next[k] = root.barAnchors[k]
-    next[name] = { x: Math.round(Number(x) || 0), y: Math.round(Number(y) || 0), size: Math.round(Number(size) || 0) }
-    root.barAnchors = next
+    var anchor = { x: Math.round(Number(x) || 0), y: Math.round(Number(y) || 0), size: Math.round(Number(size) || 0) }
+    var old = root.barAnchors[name]
+    // The bar re-publishes after every relayout (each park changes its width);
+    // an unchanged anchor must not re-evaluate every flight binding.
+    if (old && old.x === anchor.x && old.y === anchor.y && old.size === anchor.size) return
+    root.barAnchors = Model.assoc(root.barAnchors, name, anchor)
   }
 
   function monitorFor(id) {
@@ -139,10 +141,7 @@ Item {
   }
 
   function beginFlight(job, cut) {
-    var next = {}
-    for (var k in root.pendingFlights) next[k] = root.pendingFlights[k]
-    next[job.token] = { job: job, cut: cut, started: Date.now() }
-    root.pendingFlights = next
+    root.pendingFlights = Model.assoc(root.pendingFlights, job.token, { job: job, cut: cut, started: Date.now() })
     if (job.kind === "park") root.flightPark(job)
     else root.flightRestore(job)
   }
@@ -151,9 +150,7 @@ Item {
   function flightCut(token) {
     var pending = root.pendingFlights[String(token)]
     if (!pending) return "unknown"
-    var next = {}
-    for (var k in root.pendingFlights) if (k !== String(token)) next[k] = root.pendingFlights[k]
-    root.pendingFlights = next
+    root.pendingFlights = Model.dissoc(root.pendingFlights, String(token))
     try { pending.cut() } catch (e) { console.warn("reprieve: flight cut failed", e) }
     return "ok"
   }
@@ -329,9 +326,7 @@ Item {
   }
 
   function pluginEntry() {
-    var entry = { id: root.pluginId }
-    for (var k in root.settingsEntry) entry[k] = root.settingsEntry[k]
-    return entry
+    return Object.assign({ id: root.pluginId }, root.settingsEntry)
   }
 
   function setting(name, fallback) {
@@ -349,9 +344,7 @@ Item {
       next[name] = value
       if (root.shell.updateEntryInline(root.pluginId, next) === false) return false
       // Reflect accepted changes immediately; the watcher confirms shortly after.
-      var local = {}
-      for (var k in next) local[k] = next[k]
-      root.settingsEntry = local
+      root.settingsEntry = next
       return true
     } catch (e) {
       console.warn("reprieve: saveSetting failed", e)
@@ -408,6 +401,10 @@ Item {
 
   function flushJournal() {
     if (!root.journalDirty || journalWriter.running) return
+    // Until reconcile has merged the journal read at startup, the in-memory
+    // state lacks its entries: writing now would replace the file with a
+    // partial history. reconcile() commits, and that persists, right after.
+    if (!root.journalConsumed) return
     // Never race a quarantine rename with a fresh write.
     if (quarantineProcess.running) { persistDebounce.restart(); return }
     root.journalDirty = false
@@ -511,13 +508,10 @@ Item {
   function expect(address, kind) {
     var addr = Model.normalizeAddress(address)
     if (!addr) return
-    var next = {}
-    for (var k in root.expected) next[k] = root.expected[k]
-    var slot = next[addr] ? Object.assign({}, next[addr]) : { close: 0, move: 0 }
+    var slot = Object.assign({ close: 0, move: 0 }, root.expected[addr])
     slot[kind] = (slot[kind] || 0) + 1
     slot.at = Date.now()
-    next[addr] = slot
-    root.expected = next
+    root.expected = Model.assoc(root.expected, addr, slot)
     expectSweep.restart()
   }
 
@@ -525,13 +519,9 @@ Item {
     var addr = Model.normalizeAddress(address)
     var slot = addr ? root.expected[addr] : null
     if (!slot || !(slot[kind] > 0)) return false
-    var next = {}
-    for (var k in root.expected) next[k] = root.expected[k]
     var copy = Object.assign({}, slot)
     copy[kind] -= 1
-    if (copy.close <= 0 && copy.move <= 0) delete next[addr]
-    else next[addr] = copy
-    root.expected = next
+    root.expected = copy.close <= 0 && copy.move <= 0 ? Model.dissoc(root.expected, addr) : Model.assoc(root.expected, addr, copy)
     return true
   }
 
@@ -571,7 +561,23 @@ Item {
   function currentWorkspace() {
     try {
       var name = root.workspaceName(Hyprland.focusedWorkspace)
+      // An open special workspace (scratchpad) is focused on top of the
+      // monitor's regular workspace; "here" means the latter.
+      if (Model.isSpecialWorkspace(name)) name = root.workspaceName(Hyprland.focusedMonitor && Hyprland.focusedMonitor.activeWorkspace)
       if (name && !Model.isSpecialWorkspace(name)) return Model.normalizeWorkspace(name)
+    } catch (e) {}
+    return ""
+  }
+
+  // Screen name of the monitor showing a workspace, or "" when Hyprland
+  // does not know it yet (it is created on demand).
+  function workspaceScreen(workspace) {
+    try {
+      var list = Hyprland.workspaces ? (Hyprland.workspaces.values || []) : []
+      for (var i = 0; i < list.length; i++) {
+        var ws = list[i]
+        if (ws && root.workspaceName(ws) === String(workspace)) return ws.monitor && ws.monitor.name ? String(ws.monitor.name) : ""
+      }
     } catch (e) {}
     return ""
   }
@@ -731,16 +737,37 @@ Item {
     root.strandedCount = n
   }
 
-  function patchSnapshot(address, patch) {
+  function patchSnapshot(address, patch, replace) {
     var addr = Model.normalizeAddress(address)
     if (!addr) return
-    var next = {}
-    for (var key in root.snapshots) next[key] = root.snapshots[key]
-    var existing = next[addr] ? Object.assign({}, next[addr]) : { address: addr }
-    for (var p in patch) existing[p] = patch[p]
-    next[addr] = existing
-    root.snapshots = next
+    var base = root.snapshots[addr] && !replace ? root.snapshots[addr] : { address: addr }
+    root.snapshots = Model.assoc(root.snapshots, addr, Object.assign({}, base, patch))
     if (patch.workspace !== undefined) root.recountStranded()
+  }
+
+  function dropSnapshot(addr) {
+    if (!root.snapshots[addr]) return
+    root.snapshots = Model.dissoc(root.snapshots, addr)
+    root.recountStranded()
+  }
+
+  // A closed window can no longer be moved, and Hyprland may hand its
+  // address to the next window it maps. Drop every deferred action on it:
+  // a pending flight cut would otherwise hide that unrelated window.
+  function forgetWindow(addr) {
+    var next = {}
+    var dropped = false
+    for (var token in root.pendingFlights) {
+      if (root.pendingFlights[token].job.address === addr) dropped = true
+      else next[token] = root.pendingFlights[token]
+    }
+    if (dropped) root.pendingFlights = next
+    if (root.expected[addr]) root.expected = Model.dissoc(root.expected, addr)
+    // The overlay finishes the scene; its cut finds no pending token.
+    try {
+      if (dropped && root.flightHandler && root.flightHandler.finishAddress)
+        root.flightHandler.finishAddress(addr)
+    } catch (e) { console.warn("reprieve: finishing flight failed", e) }
   }
 
   // ---------------------------------------------------------------- media
@@ -865,6 +892,10 @@ Item {
     // A window coming back to another workspace switches there first (the
     // focus would have done that anyway) so the flight happens in view.
     var job = root.flightJob("restore", root.liveHandle(effect.address), effect.address)
+    // The remembered frame belongs to the screen it was parked from. A window
+    // returning to a workspace on another monitor is a plain cut there.
+    var screen = job ? root.workspaceScreen(workspace) : ""
+    if (job && screen && screen !== job.screen) job = null
     if (job && focus && workspace !== root.currentWorkspace() && !Model.isSpecialWorkspace(workspace))
       root.hyprDispatch('hl.dsp.focus({ workspace = "' + workspace + '" })')
     else if (job && !focus && workspace !== root.currentWorkspace())
@@ -933,9 +964,7 @@ Item {
     // lastIpcObject does not track live drag/resize geometry. Reserve the cut
     // now (so early undo can settle it), and read fresh geometry before drawing.
     var token = "f" + (++root.flightSequence)
-    var next = Object.assign({}, root.pendingFlights)
-    next[token] = { job: { token: token, kind: "park", address: snapshot.address }, cut: cut, started: Date.now() }
-    root.pendingFlights = next
+    root.pendingFlights = Model.assoc(root.pendingFlights, token, { job: { token: token, kind: "park", address: snapshot.address }, cut: cut, started: Date.now() })
     root.parkReadQueue = root.parkReadQueue.concat([token])
     root.pumpParkReads()
   }
@@ -1087,7 +1116,11 @@ Item {
 
   function redoLast() {
     var previous = root.model
-    var result = Model.redo(previous)
+    // The window was visible since its restore and may have moved: park the
+    // state it has now, so the next restore returns it there.
+    var top = (previous.redo || [])[(previous.redo || []).length - 1]
+    var handle = top && top.type === "park" ? root.liveHandle(top.address) : null
+    var result = Model.redo(previous, undefined, handle ? root.snapshotFromHandle(handle) : null)
     if (!result.action) {
       root.lastResult = "empty"
       return "empty"
@@ -1143,7 +1176,15 @@ Item {
   function handleClose(address) {
     var addr = Model.normalizeAddress(address)
     if (!addr) return
-    if (root.consume(addr, "close")) {
+    var ours = root.consume(addr, "close")
+    root.forgetWindow(addr)
+    root.recordClose(addr, ours)
+    // Its cached workspace would count it as stranded until the next refresh.
+    root.dropSnapshot(addr)
+  }
+
+  function recordClose(addr, ours) {
+    if (ours) {
       if (Model.findParked(root.model, addr) !== -1) root.commit(Model.dropAddress(root.model, addr))
       return
     }
@@ -1194,6 +1235,32 @@ Item {
       snap.recovered = true
       var result = Model.pushRecovered(root.model, snap)
       if (result.action) root.commit(result.state)
+    }
+  }
+
+  function handleRawEvent(name, data) {
+    if (name === "openwindow") {
+      var parts = data.split(",")
+      var address = Model.normalizeAddress(parts[0])
+      // A new window: nothing cached under a reused address applies to it.
+      if (address) root.patchSnapshot(address, { openedAt: Date.now(), workspace: String(parts[1] || ""), class: String(parts[2] || "") }, true)
+      // A dialog spawned by a parked app opens on the parked app's
+      // workspace, i.e. hidden. Give it a timeline entry.
+      if (address && String(parts[1] || "") === root.parkWorkspace) adoptTimer.queue(address)
+      refreshDebounce.restart()
+    } else if (name === "closewindow") {
+      root.handleClose(data.split(",")[0])
+      cacheDebounce.restart()
+    } else if (name === "movewindowv2") {
+      var mv = data.split(",")
+      var ws = mv.slice(2).join(",")
+      root.handleMove(mv[0], ws)
+      root.patchSnapshot(mv[0], { workspace: ws, workspaceKnown: true })
+    } else if (name === "changefloatingmode") {
+      var fl = data.split(",")
+      root.patchSnapshot(fl[0], { floating: fl[1] === "1", floatingKnown: true })
+    } else if (name === "fullscreen") {
+      refreshDebounce.restart()
     }
   }
 
@@ -1443,31 +1510,7 @@ Item {
 
   Connections {
     target: Hyprland
-    function onRawEvent(event) {
-      var name = String((event && event.name) || "")
-      var data = String((event && event.data) || "")
-      if (name === "openwindow") {
-        var parts = data.split(",")
-        var address = Model.normalizeAddress(parts[0])
-        if (address) root.patchSnapshot(address, { openedAt: Date.now(), workspace: String(parts[1] || ""), class: String(parts[2] || "") })
-        // A dialog spawned by a parked app opens on the parked app's
-        // workspace, i.e. hidden. Give it a timeline entry.
-        if (address && String(parts[1] || "") === root.parkWorkspace) adoptTimer.queue(address)
-        refreshDebounce.restart()
-      } else if (name === "closewindow") {
-        root.handleClose(data.split(",")[0])
-        cacheDebounce.restart()
-      } else if (name === "movewindowv2") {
-        var mv = data.split(",")
-        root.handleMove(mv[0], mv.slice(2).join(","))
-        root.patchSnapshot(mv[0], { workspace: mv.slice(2).join(","), workspaceKnown: true })
-      } else if (name === "changefloatingmode") {
-        var fl = data.split(",")
-        root.patchSnapshot(fl[0], { floating: fl[1] === "1", floatingKnown: true })
-      } else if (name === "fullscreen") {
-        refreshDebounce.restart()
-      }
-    }
+    function onRawEvent(event) { root.handleRawEvent(String((event && event.name) || ""), String((event && event.data) || "")) }
   }
 
   GlobalShortcut { appid: root.pluginId; name: "undo"; description: "Restore the last parked window"; onPressed: root.undoLast() }

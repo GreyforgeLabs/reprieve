@@ -6,7 +6,6 @@
 set -u
 
 PLUGIN_ID="tech.greyforge.reprieve"
-HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 ACTION="${1:-help}"
 shift || true
 
@@ -21,6 +20,14 @@ ipc() {
   out=$(timeout 0.6 omarchy-shell "$PLUGIN_ID" "$method" "$@" 2>/dev/null); rc=$?
   printf '%s' "$out"
   return "$rc"
+}
+
+# The plugin's bin directory, through the ~/.local/bin symlink. Resolved only
+# by the commands that run a sibling helper, so Super+W does not pay for it.
+here() {
+  local self
+  self="$(readlink -f -- "$0")" || self="$0"
+  printf '%s' "${self%/*}"
 }
 
 hypr_close_active() {
@@ -163,22 +170,22 @@ case "$ACTION" in
   setup)
     if ! omarchy-shell shell summon "$PLUGIN_ID" '{"view":"setup"}' >/dev/null 2>&1; then
       echo "reprieve: shell is not running; installing bindings directly" >&2
-      exec python3 "$HERE/reprieve-binds" install "$@"
+      exec python3 "$(here)/reprieve-binds" install "$@"
     fi
     ;;
   install-binds)
-    exec python3 "$HERE/reprieve-binds" install "$@"
+    exec python3 "$(here)/reprieve-binds" install "$@"
     ;;
   remove-binds)
-    exec python3 "$HERE/reprieve-binds" remove "$@"
+    exec python3 "$(here)/reprieve-binds" remove "$@"
     ;;
   binds)
-    exec python3 "$HERE/reprieve-binds" "$@"
+    exec python3 "$(here)/reprieve-binds" "$@"
     ;;
   uninstall)
     restored="$(ipc restoreAll)"
     [[ -n "$restored" ]] && echo "reprieve: restored parked windows: $restored"
-    python3 "$HERE/reprieve-binds" remove
+    python3 "$(here)/reprieve-binds" remove
     echo "reprieve: now run: omarchy plugin remove $PLUGIN_ID"
     ;;
   bar)
@@ -189,7 +196,7 @@ case "$ACTION" in
     need_plugin setSetting "$1" "$2"
     ;;
   doctor)
-    exec python3 "$HERE/reprieve-doctor" "$@"
+    exec python3 "$(here)/reprieve-doctor" "$@"
     ;;
   help|-h|--help)
     usage

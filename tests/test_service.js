@@ -11,9 +11,11 @@ function service() {
     parkReadQueue: [], currentParkRead: "", parkWorkspace: Model.PARK_WORKSPACE, flight: "angel", session: "", showToast: false,
     parkTimeout: 0, pauseMediaOnPark: false, flightHandler: {remembered: () => null, wants: () => true},
     flightPark: job => jobs.push(job), flightRestore: job => jobs.push(job), windowParked() {},
-    flightArrived() {}, mediaQueue: [], trackAppClose: false}
+    flightArrived() {}, mediaQueue: [], trackAppClose: false, strandedCount: 0, journalConsumed: true,
+    journalDirty: false, pendingJournalText: "", journalBin: "reprieve-journal", stateDir: "/state", barAnchors: {}}
   const timer = {restart() {}, queue() {}}
   const Hyprland = {toplevels: {values: [handle]}, monitors: {values: [{id: 0, name: "DP-2", x: 0, y: 0, scale: 1}]},
+    workspaces: {values: []}, focusedMonitor: null,
     focusedWorkspace: {name: "2"}, activeToplevel: handle,
     dispatch(lua) {
       dispatches.push(lua)
@@ -27,7 +29,9 @@ function service() {
   Object.defineProperty(parkGeometryReader, "running", {get: () => false, set(value) {
     if (value) root.finishParkRead(root.currentParkRead, JSON.stringify([Object.assign({}, handle.lastIpcObject, {address: handle.address})]), 0)
   }})
-  const context = vm.createContext({root, Model, Hyprland, console, Date,
+  const journalWriter = {running: false, payload: "", command: []}
+  const context = vm.createContext({root, Model, Hyprland, console, Date, journalWriter,
+    quarantineProcess: {running: false}, cacheDebounce: timer, refreshDebounce: timer, adoptTimer: timer,
     parkGeometryReader, flightWatchdog: timer, expectSweep: timer, persistDebounce: timer, animClear: timer,
     toastTimer: timer, mediaProcess: {running: false}, mediaTimeout: timer,
     Quickshell: {execDetached() {}}, Qt: {callLater() {}}})
@@ -40,7 +44,7 @@ function service() {
   vm.runInContext("function timeoutChanged() {" + change[1] + "}", context)
   root.timeoutChanged = context.timeoutChanged
   context.parkTimeout = 5
-  return {root, handle, jobs, dispatches, context}
+  return {root, handle, jobs, dispatches, context, journalWriter}
 }
 let failures = 0
 function test(name, fn) {try {fn(); console.log("PASS", name)} catch (e) {failures++; console.error("FAIL", name, e.message)}}
@@ -116,5 +120,89 @@ test("immediate re-park uses the restore workspace while IPC geometry lags", () 
   root.undoLast()
   assert.equal(root.parkWindow("0xabc"), "parked")
   assert.equal(root.model.undo[0].workspace, "2")
+})
+function moves(dispatches) {
+  return dispatches.filter(d => d.includes("window.move")).map(d => d.match(/workspace = "([^"]+)"/)[1])
+}
+test("a window closed during its park flight is never hidden later (address reuse)", () => {
+  const {root, handle, jobs, dispatches, context} = service()
+  root.parkWindow("0xabc")
+  context.Hyprland.toplevels.values = []
+  root.handleClose("abc")
+  // Hyprland maps an unrelated window at the same address before the
+  // overlay or watchdog reaches the old cut.
+  const reused = {address: "0xabc", title: "New", workspace: {name: "3"}, lastIpcObject: {class: "foot", workspace: {name: "3"}}}
+  context.Hyprland.toplevels.values = [reused]
+  assert.equal(root.flightCut(jobs[0].token), "unknown")
+  assert.deepEqual(moves(dispatches), [])
+  assert.equal(Object.keys(root.pendingFlights).length, 0)
+  assert.equal(handle.workspace.name, "2")
+})
+test("closing a parked window does not report it as stranded", () => {
+  const {root, jobs, context} = service()
+  root.parkWindow("0xabc"); root.flightCut(jobs[0].token)
+  assert.equal(root.strandedCount, 0)
+  context.Hyprland.toplevels.values = []
+  root.handleClose("abc")
+  assert.equal(root.strandedCount, 0)
+  assert.equal(Model.findParked(root.model, "0xabc"), -1)
+})
+test("the journal is not replaced before the startup read is merged", () => {
+  const {root, journalWriter} = service()
+  root.session = "test-session"
+  root.journalConsumed = false
+  root.model = Model.pushPark(root.model, {address: "0xabc", class: "foot", title: "Probe", workspace: "2"}, 1).state
+  root.persist(); root.flushJournal()
+  assert.equal(journalWriter.running, false, "wrote a journal that lacks the unread entries")
+  assert.equal(root.journalDirty, true)
+  root.journalConsumed = true
+  root.flushJournal()
+  assert.equal(journalWriter.running, true)
+  assert.equal(JSON.parse(journalWriter.payload).entries[0].address, "0xabc")
+})
+test("a window mapped at a reused address starts from a fresh snapshot", () => {
+  const {root} = service()
+  root.snapshots = {"0xabc": {address: "0xabc", workspace: "special:reprieve", workspaceKnown: true, floating: true, floatingKnown: true}}
+  root.handleRawEvent("openwindow", "abc,3,foot,shell")
+  assert.equal(root.snapshots["0xabc"].workspace, "3")
+  assert.equal(root.snapshots["0xabc"].floatingKnown, undefined)
+  assert.equal(root.snapshots["0xabc"].workspaceKnown, undefined)
+})
+test("redo parks the window where it is now, so undo returns it there", () => {
+  const {root, handle, jobs, dispatches} = service()
+  root.parkWindow("0xabc"); root.flightCut(jobs[0].token)
+  root.undoLast()
+  // The user moves the restored window to workspace 7.
+  handle.workspace = {name: "7"}; handle.lastIpcObject.workspace = {name: "7"}
+  root.handleMove("abc", "7"); root.patchSnapshot("abc", {workspace: "7", workspaceKnown: true})
+  root.redoLast(); root.flightCut(jobs[jobs.length - 1].token)
+  root.undoLast()
+  assert.equal(moves(dispatches).pop(), "7")
+})
+test("a restore flight is skipped when the window returns on another screen", () => {
+  for (const [monitor, flies] of [["HDMI-A-1", false], ["DP-2", true]]) {
+    const {root, jobs, context} = service()
+    root.flightHandler.remembered = () => ({rect: {x: 0, y: 0, w: 600, h: 400}, screen: "DP-2"})
+    context.Hyprland.workspaces.values = [{name: "2", monitor: {name: monitor}}]
+    root.parkWindow("0xabc"); root.flightCut(jobs[0].token)
+    root.undoLast()
+    assert.equal(jobs.filter(j => j.kind === "restore").length, flies ? 1 : 0, monitor)
+  }
+})
+test("restoring here while a scratchpad is open uses the monitor's workspace", () => {
+  const {root, context} = service()
+  context.Hyprland.focusedWorkspace = {name: "special:magic"}
+  context.Hyprland.focusedMonitor = {name: "DP-2", activeWorkspace: {name: "4"}}
+  assert.equal(root.currentWorkspace(), "4")
+})
+test("re-publishing an unchanged bar anchor keeps the same object", () => {
+  const {root} = service()
+  root.setBarAnchor("DP-2", 10, 20, 22)
+  const first = root.barAnchors
+  root.setBarAnchor("DP-2", 10.2, 19.8, 22)
+  assert.equal(root.barAnchors, first)
+  root.setBarAnchor("DP-2", 40, 20, 22)
+  assert.notEqual(root.barAnchors, first)
+  assert.equal(root.barAnchors["DP-2"].x, 40)
 })
 if (failures) process.exit(1)

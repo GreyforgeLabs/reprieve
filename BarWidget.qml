@@ -39,7 +39,6 @@ BarWidget {
   readonly property bool showInBar: setting("showInBar", service ? service.showInBar : true) !== false
   readonly property var trayEntries: tray ? parkedEntries.slice(0, maxIcons) : []
   readonly property int overflow: tray ? Math.max(0, parked - maxIcons) : parked
-  readonly property string glyph: ""
   readonly property real iconSize: Style.bar.iconCanvas
   readonly property color foreground: bar ? bar.barForeground : Color.bar.text
   readonly property color brandAmber: "#fda52b"

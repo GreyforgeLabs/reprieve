@@ -53,5 +53,26 @@ STUB_MODE=slow;        check "timed-out park never closes (the safety net holds)
 STUB_MODE=down;        check "close action still closes when shell is down" 1 close
 STUB_MODE=noactive;    check "close falls back when plugin has no active toplevel" 1 close
 
+# Helper commands still find their siblings through the ~/.local/bin link.
+ln -s "$PWD/bin/reprieve" "$STUB/reprieve"
+if (cd / && PATH="$STUB:$PATH" reprieve binds --help 2>/dev/null | grep -q "usage: reprieve-binds"); then
+  pass=$((pass+1)); echo "PASS  helper commands resolve the plugin directory through a symlink"
+else
+  fail=$((fail+1)); echo "FAIL  helper commands resolve the plugin directory through a symlink"
+fi
+
+# Super+W launches nothing but the IPC call (no path resolution helpers).
+for tool in readlink dirname; do
+  printf '#!/bin/sh\necho %s >> "%s"\nexec %s "$@"\n' "$tool" "$LOG" "$(command -v $tool)" > "$STUB/$tool"
+  chmod +x "$STUB/$tool"
+done
+: > "$LOG"
+PATH="$STUB:$PATH" HYPRCTL_LOG="$LOG" STUB_MODE=parked bash bin/reprieve park
+if [[ ! -s "$LOG" ]]; then
+  pass=$((pass+1)); echo "PASS  park spawns no path-resolution helpers"
+else
+  fail=$((fail+1)); echo "FAIL  park spawns no path-resolution helpers ($(tr '\n' ' ' < "$LOG"))"
+fi
+
 echo "wrapper: passed $pass, failed $fail"
 [[ $fail -eq 0 ]]

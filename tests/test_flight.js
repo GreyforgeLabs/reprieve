@@ -10,7 +10,7 @@ let destroyed = 0
 const deferred = []
 const root = {service: {undoStack: [], redoStack: []}, scenes: {f1: {job: {address: '0xabc'}}},
   memory: {'0xabc': {view: {destroy() {destroyed++}}}}, activeCount: 1, flown: 0}
-const context = vm.createContext({root, Qt: {callLater: fn => deferred.push(fn)}})
+const context = vm.createContext({root, Model: require('../ReprieveModel.js'), Qt: {callLater: fn => deferred.push(fn)}})
 for (const method of source.matchAll(/^  function (\w+)\([^\n]*\) \{\n[\s\S]*?^  \}/gm)) {
   vm.runInContext(method[0], context); root[method[1]] = context[method[1]]
 }

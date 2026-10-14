@@ -53,17 +53,12 @@ Item {
   }
 
   function remember(address, entry) {
-    var next = {}
-    for (var k in root.memory) next[k] = root.memory[k]
-    next[String(address)] = entry
-    root.memory = next
+    root.memory = Model.assoc(root.memory, String(address), entry)
   }
 
   function forget(address) {
-    var next = {}
     var gone = root.memory[String(address)]
-    for (var k in root.memory) if (k !== String(address)) next[k] = root.memory[k]
-    root.memory = next
+    root.memory = Model.dissoc(root.memory, String(address))
     if (gone && gone.view) gone.view.destroy()
   }
 
@@ -96,9 +91,7 @@ Item {
     }
     var scene = sceneComponent.createObject(container, { job: job, frame: view })
     if (!scene) { if (service) service.flightCut(job.token); return }
-    var next = Object.assign({}, root.scenes)
-    next[job.token] = scene
-    root.scenes = next
+    root.scenes = Model.assoc(root.scenes, job.token, scene)
     root.activeCount++
   }
 
@@ -111,9 +104,7 @@ Item {
   }
 
   function sceneDone(scene) {
-    var next = Object.assign({}, root.scenes)
-    delete next[scene.job.token]
-    root.scenes = next
+    root.scenes = Model.dissoc(root.scenes, scene.job.token)
     root.activeCount = Math.max(0, root.activeCount - 1)
     root.flown++
     scene.destroy()
@@ -175,19 +166,11 @@ Item {
         // parked frames wait here between flights
         property Item vault: Item { parent: stage; visible: false; z: -1 }
         function register() {
-          if (!screenName) return
-          var next = {}
-          for (var k in root.containers) next[k] = root.containers[k]
-          next[screenName] = stage
-          root.containers = next
+          if (screenName) root.containers = Model.assoc(root.containers, screenName, stage)
         }
         Component.onCompleted: register()
         onScreenNameChanged: register()
-        Component.onDestruction: {
-          var next = {}
-          for (var k in root.containers) if (k !== screenName) next[k] = root.containers[k]
-          root.containers = next
-        }
+        Component.onDestruction: root.containers = Model.dissoc(root.containers, screenName)
       }
     }
   }
@@ -528,7 +511,6 @@ Item {
           ctx.fillStyle = hg
           ctx.beginPath(); ctx.arc(cx, haloY, 16, 0, Math.PI * 2); ctx.fill()
           ctx.strokeStyle = rgba(amber, 0.95)
-          ctx.lineWidth = 2
           ctx.lineWidth = 2.5
           ctx.beginPath(); ctx.ellipse(cx - 14, haloY - 4, 28, 8); ctx.stroke()
           ctx.strokeStyle = "rgba(255,244,214,0.9)"

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import subprocess
 import sys
@@ -29,37 +28,43 @@ def remaining() -> float:
     return _deadline - time.monotonic()
 
 
-def descendants(root: int) -> set[int]:
-    pids = {root} if root > 0 else set()
-    if not pids:
-        return pids
-    children: dict[int, list[int]] = {}
-    proc = "/proc"
+def parent_of(pid: int) -> int:
     try:
-        names = os.listdir(proc)
-    except OSError:
-        return pids
+        with open(f"/proc/{pid}/stat", "rt", encoding="utf-8") as fh:
+            stat = fh.read()
+        # The command name may contain spaces and parentheses; ppid follows
+        # the state field after the last ")".
+        return int(stat[stat.rfind(")") + 2 :].split()[1])
+    except (OSError, IndexError, ValueError):
+        return 0
+
+
+def window_pids(root: int, names: list[str]) -> set[int]:
+    """PIDs written in the player names that belong to root's process tree.
+
+    player_matches() accepts a PID only as a whole number inside the name, so
+    these are the only members of the window's process tree that can matter.
+    Walking up from each candidate reads a few /proc entries instead of the
+    stat file of every process on the system.
+    """
+    found: set[int] = set()
+    if root <= 0:
+        return found
     for name in names:
-        if not name.isdigit():
-            continue
-        child = int(name)
-        try:
-            with open(f"{proc}/{child}/stat", "rt", encoding="utf-8") as fh:
-                stat = fh.read()
-            close = stat.rfind(")")
-            fields = stat[close + 2 :].split()
-            ppid = int(fields[1])
-        except (OSError, IndexError, ValueError):
-            continue
-        children.setdefault(ppid, []).append(child)
-    stack = list(pids)
-    while stack:
-        current = stack.pop()
-        for child in children.get(current, []):
-            if child not in pids:
-                pids.add(child)
-                stack.append(child)
-    return pids
+        for run in re.findall(r"\d+", name):
+            if run != str(int(run)):
+                continue  # a leading zero never matches a PID
+            candidate = current = int(run)
+            if candidate in found:
+                continue
+            for _ in range(256):
+                if current == root:
+                    found.add(candidate)
+                    break
+                if current <= 1:
+                    break
+                current = parent_of(current)
+    return found
 
 
 def parse_sink_inputs(text: str) -> list[dict]:
@@ -103,17 +108,21 @@ def run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(cmd, 1, "", "timeout")
 
 
+MPRIS_NAME = re.compile(r'"(org\.mpris\.MediaPlayer2\.[A-Za-z0-9_.-]+)"')
+
+
 def mpris_names() -> list[str]:
-    result = run(["busctl", "--user", "list"])
+    # ListNames returns only names that are currently owned, in one bus
+    # call. `busctl list` also lists activatable names (a property read on
+    # one of those starts the service) and resolves every peer's
+    # credentials, which costs several times as long.
+    result = run([
+        "busctl", "--user", "call", "org.freedesktop.DBus", "/org/freedesktop/DBus",
+        "org.freedesktop.DBus", "ListNames",
+    ])
     if result.returncode != 0:
         return []
-    prefix = "org.mpris.MediaPlayer2."
-    names = []
-    for line in result.stdout.splitlines():
-        name = line.split()[0] if line.split() else ""
-        if name.startswith(prefix):
-            names.append(name)
-    return names
+    return list(dict.fromkeys(MPRIS_NAME.findall(result.stdout)))
 
 
 def mpris_status(name: str) -> str:
@@ -177,15 +186,19 @@ def player_matches(name: str, pids: set[int], klass: str) -> bool:
 
 def pause(pid: int, klass: str) -> dict:
     begin()
-    pids = descendants(pid)
     # WirePlumber saves mute per application. A stream can disappear during
     # Pause, browser idle, or process exit; restoring its old index cannot
     # undo that saved mute. Never use persistent mixer controls for parking.
     paused: list[str] = []
-    for name in mpris_names():
-        if mpris_status(name) != "Playing":
-            continue
+    names = mpris_names()
+    if not names:
+        return {"muted": [], "paused": paused}
+    pids = window_pids(pid, names)
+    for name in names:
+        # Matching is local; only matching players cost a bus round trip.
         if not player_matches(name, pids, klass):
+            continue
+        if mpris_status(name) != "Playing":
             continue
         if mpris_call(name, "Pause"):
             paused.append(name)

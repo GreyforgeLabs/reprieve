@@ -65,6 +65,16 @@ test("label sanitization", () => {
   assert.ok(M.toastLabel({ title: "x".repeat(80) }).length <= 32)
   assert.strictEqual(M.sanitizeClass("goo gle\nchrome"), "googlechrome")
   assert.ok(M.sanitizeClass("c".repeat(500)).length <= 128)
+  // Control characters are dropped before the length cap, and whitespace
+  // runs collapse after it.
+  assert.strictEqual(M.sanitizeLabel("\u0001".repeat(60) + "tail", 52), "tail")
+  assert.strictEqual(M.sanitizeLabel("ab" + " ".repeat(60) + "cd", 52), "ab")
+  assert.strictEqual(M.sanitizeLabel("  a \u007f b  ", 52), "a b")
+  assert.strictEqual(M.sanitizeClass("\u0000".repeat(200) + "foot"), "foot")
+  assert.strictEqual(M.sanitizeClass("a\u007fb c"), "abc")
+  const parked = M.pushPark(M.createState(), snap({ title: " Inbox\t- Gmail " })).action
+  assert.strictEqual(parked.title, "Inbox- Gmail")
+  assert.strictEqual(parked.label, parked.title)
 })
 
 // ------------------------------------------------------------------ parking
@@ -677,6 +687,62 @@ test("reopen entries are address-less and resolve by sequence", () => {
   assert.strictEqual(t.undo.length, 1)
   assert.strictEqual(t.undo[0].label, "B")
   assert.strictEqual(M.findBySequence(t, dropSeq), -1)
+})
+
+test("redo parks the window's current layout, not its first park", () => {
+  let s = M.pushPark(M.createState(), snap({ address: "0x1", workspace: "2", floating: false })).state
+  // Restored here (workspace 5), then the user floats it.
+  const u = M.undoAt(s, 0, { workspace: "5" })
+  assert.strictEqual(u.effects[0].workspace, "5")
+  const live = snap({ address: "0x1", workspace: "5", floating: true, fullscreen: 1, fullscreenClient: 1 })
+  const red = M.redo(u.state, 1000, live)
+  assert.strictEqual(red.state.undo[0].workspace, "5")
+  assert.strictEqual(red.state.undo[0].floating, true)
+  assert.strictEqual(red.state.undo[0].fullscreen, 1)
+  assert.strictEqual(red.state.undo[0].parkedAt, 1000)
+  const back = M.undo(red.state)
+  assert.strictEqual(back.effects[0].workspace, "5")
+  assert.strictEqual(back.effects[0].floating, true)
+  // No live window, another window, or one now on a special workspace: the
+  // recorded layout is kept.
+  assert.strictEqual(M.redo(u.state, 1000).state.undo[0].workspace, "2")
+  assert.strictEqual(M.redo(u.state, 1000, snap({ address: "0x2", workspace: "7" })).state.undo[0].workspace, "2")
+  assert.strictEqual(M.redo(u.state, 1000, snap({ address: "0x1", workspace: "special:magic" })).state.undo[0].workspace, "2")
+  // A recovered window that was restored has a known home from then on.
+  const rec = M.pushRecovered(M.createState(), { address: "0x3", class: "foot" }).state
+  const ru = M.undoAt(rec, 0, { workspace: "4" })
+  const rr = M.redo(ru.state, 1000, snap({ address: "0x3", class: "foot", workspace: "4" }))
+  assert.strictEqual(rr.state.undo[0].workspace, "4")
+  assert.strictEqual(rr.state.undo[0].recovered, false)
+})
+
+test("a used Reopen entry is not resurrected by redo", () => {
+  let s = M.pushPark(M.createState(), snap({ address: "0x1", class: "foot" })).state
+  s = M.undo(s).state // foot restored: waits on redo
+  s = M.pushRelaunch(s, snap({ address: "0xdead" })).state
+  // pushRelaunch clears redo like any new entry; restore the scenario where
+  // a park is still redoable underneath.
+  s = Object.assign(M.cloneState(s), { redo: [M.pushPark(M.createState(), snap({ address: "0x1", class: "foot" })).action] })
+  const reopened = M.undo(s)
+  assert.strictEqual(reopened.effects[0].type, "relaunch")
+  assert.strictEqual(reopened.state.undo.length, 0)
+  assert.deepStrictEqual(reopened.state.redo.map(a => a.address), ["0x1"])
+  // Redo re-parks the window, it does not bring back the spent Reopen row.
+  const red = M.redo(reopened.state)
+  assert.strictEqual(red.action.type, "park")
+  assert.strictEqual(red.state.undo.length, 1)
+  assert.strictEqual(M.redo(M.undo(M.pushRelaunch(M.createState(), snap()).state).state).action, null)
+})
+
+test("assoc/dissoc return new maps and leave the original untouched", () => {
+  const map = { a: 1, b: 2 }
+  const added = M.assoc(map, "c", 3)
+  assert.deepStrictEqual(added, { a: 1, b: 2, c: 3 })
+  const removed = M.dissoc(map, "a")
+  assert.deepStrictEqual(removed, { b: 2 })
+  assert.deepStrictEqual(map, { a: 1, b: 2 })
+  assert.notStrictEqual(M.dissoc(map, "missing"), map)
+  assert.deepStrictEqual(M.assoc(undefined, "k", 1), { k: 1 })
 })
 
 console.log("ReprieveModel tests passed (" + passed + ")")

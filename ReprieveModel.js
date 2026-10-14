@@ -32,6 +32,20 @@ function defaultExcludedClasses() {
   }
 }
 
+// Shallow copies with one key set or removed. QML `var` properties notify
+// only when reassigned, so maps are replaced rather than mutated.
+function assoc(map, key, value) {
+  var next = Object.assign({}, map)
+  next[key] = value
+  return next
+}
+
+function dissoc(map, key) {
+  var next = Object.assign({}, map)
+  delete next[key]
+  return next
+}
+
 function clampMax(value) {
   var n = Number(value)
   if (!isFinite(n)) return DEFAULT_MAX
@@ -138,27 +152,16 @@ function clampInt(value, lo, hi, fallback) {
   return n
 }
 
+// The first maxLen characters that are not control characters, with runs of
+// whitespace collapsed.
 function sanitizeLabel(value, maxLen) {
-  var title = String(value == null ? "" : value)
-  var out = ""
-  for (var i = 0; i < title.length && out.length < maxLen; i++) {
-    var code = title.charCodeAt(i)
-    if (code < 32 || code === 127) continue
-    out += title.charAt(i)
-  }
-  out = out.replace(/\s+/g, " ").trim()
-  return out || "window"
+  var title = String(value == null ? "" : value).replace(/[\x00-\x1f\x7f]/g, "").slice(0, maxLen)
+  return title.replace(/\s+/g, " ").trim() || "window"
 }
 
+// No control characters and no spaces, at most CLASS_MAX characters.
 function sanitizeClass(value) {
-  var text = String(value == null ? "" : value)
-  var out = ""
-  for (var i = 0; i < text.length && out.length < CLASS_MAX; i++) {
-    var code = text.charCodeAt(i)
-    if (code < 33 || code === 127) continue
-    out += text.charAt(i)
-  }
-  return out
+  return String(value == null ? "" : value).replace(/[\x00-\x20\x7f]/g, "").slice(0, CLASS_MAX)
 }
 
 function shortLabel(snapshot) {
@@ -199,6 +202,7 @@ function nextSequence(state) {
 
 function parkAction(snapshot, sequence, parkedAt) {
   var klass = sanitizeClass(snapshot.class)
+  var title = sanitizeLabel(snapshot.title || klass || "window", LABEL_MAX)
   return {
     type: "park",
     address: normalizeAddress(snapshot.address),
@@ -207,10 +211,10 @@ function parkAction(snapshot, sequence, parkedAt) {
     fullscreen: clampInt(snapshot.fullscreen, 0, 2, 0),
     fullscreenClient: clampInt(snapshot.fullscreenClient, 0, 2, 0),
     class: klass,
-    title: sanitizeLabel(snapshot.title || klass || "window", LABEL_MAX),
+    title: title,
     pid: clampInt(snapshot.pid, 0, 4194304, 0),
     media: sanitizeMedia(snapshot.media),
-    label: shortLabel({ title: snapshot.title, class: klass }),
+    label: title,
     sequence: sequence,
     parkedAt: nowMs(snapshot.parkedAt != null ? snapshot.parkedAt : parkedAt),
     recovered: snapshot.recovered === true
@@ -219,6 +223,7 @@ function parkAction(snapshot, sequence, parkedAt) {
 
 function relaunchAction(snapshot, sequence) {
   var klass = sanitizeClass(snapshot.class)
+  var title = sanitizeLabel(snapshot.title || klass || "window", LABEL_MAX)
   // Reopen entries relaunch the app (browser / PWA) rather than moving a
   // live window, so a Hyprland address is meaningless here. The window is
   // already gone and its address may later be reused by an unrelated
@@ -230,8 +235,8 @@ function relaunchAction(snapshot, sequence) {
     address: "",
     workspace: normalizeWorkspace(snapshot.workspace),
     class: klass,
-    title: sanitizeLabel(snapshot.title || klass || "window", LABEL_MAX),
-    label: shortLabel({ title: snapshot.title, class: klass }),
+    title: title,
+    label: title,
     sequence: sequence
   }
 }
@@ -350,12 +355,17 @@ function undoAt(state, index, opts) {
   var next = cloneState(state)
   var action = next.undo[at]
   next.undo = next.undo.slice(0, at).concat(next.undo.slice(at + 1))
-  next.redo = next.redo.concat([action])
+  // A Reopen starts a new window; there is nothing to park again, so it
+  // never lands on redo (redo would only resurrect the spent entry).
+  if (action && action.type === "park") next.redo = next.redo.concat([action])
   var effects = undoEffects(action, next, opts.workspace)
   return { state: next, effects: effects, action: action }
 }
 
-function redo(state, nowOverride) {
+// `live` is the window's current snapshot. It was visible since the restore
+// and may have moved, floated or gone fullscreen; the next restore returns it
+// to that state, not to the one it had when first parked.
+function redo(state, nowOverride, live) {
   if (!state || !state.redo || state.redo.length === 0) {
     return { state: state, effects: [], action: null }
   }
@@ -365,7 +375,16 @@ function redo(state, nowOverride) {
   if (action && action.type === "park") {
     // Redo re-hides the window, starting a new hidden interval: restart
     // the clock instead of inheriting the stamp from the original park.
-    action = Object.assign({}, action, { parkedAt: nowMs(nowOverride) })
+    var update = { parkedAt: nowMs(nowOverride) }
+    if (live && normalizeAddress(live.address) === action.address && canPark(live, next)) {
+      update.workspace = normalizeWorkspace(live.workspace)
+      update.floating = !!live.floating
+      update.fullscreen = clampInt(live.fullscreen, 0, 2, 0)
+      update.fullscreenClient = clampInt(live.fullscreenClient, 0, 2, 0)
+      // Its home is known now, even if it was first recovered without one.
+      if (update.workspace) update.recovered = false
+    }
+    action = Object.assign({}, action, update)
   }
   next.undo = next.undo.concat([action])
   var kills = []
@@ -886,6 +905,8 @@ if (typeof module !== "undefined") {
     JOURNAL_SCHEMA: JOURNAL_SCHEMA,
     JOURNAL_MAX_BYTES: JOURNAL_MAX_BYTES,
     JOURNAL_MAX_ENTRIES: JOURNAL_MAX_ENTRIES,
+    assoc: assoc,
+    dissoc: dissoc,
     defaultExcludedClasses: defaultExcludedClasses,
     clampMax: clampMax,
     clampParkTimeout: clampParkTimeout,

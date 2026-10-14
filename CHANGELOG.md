@@ -2,7 +2,7 @@
 
 All notable changes to Reprieve. Versions follow SemVer.
 
-## Unreleased
+## [1.5.3] — 2026-10-14
 
 ### Fixed
 - Parked windows cannot receive focus while on `special:reprieve`, preventing
@@ -10,6 +10,53 @@ All notable changes to Reprieve. Versions follow SemVer.
   is parked. Restoring moves the window out of that workspace before focusing it.
 - Existing installations need their managed bindings refreshed to add the rule;
   see the upgrade note in the README.
+- A window that closes while its park or restore flight is in the air is
+  forgotten at once: its deferred move, pending expectations and flight are
+  dropped, so an unrelated window that Hyprland maps at the same address is
+  never hidden by the old cut.
+- Closing a parked window no longer flags it as stranded (the bar's alert dot)
+  for a moment before the window list refreshes.
+- A window mapped at a reused address starts from a fresh snapshot instead of
+  inheriting the previous window's floating or workspace state.
+- The recovery journal is written only after the journal read at startup has
+  been merged. Enabling the timeout or parking during startup can no longer
+  replace the file with a partial history.
+- Redo parks a window in the state it has now. A window restored onto another
+  workspace (or moved, floated or made fullscreen after its restore) returns
+  there on the next undo instead of to the place it was first parked from.
+- Redo after a Reopen no longer brings back the spent Reopen row with a
+  "Parked" toast; the relaunched app is a new window.
+- A restore flight is skipped when the window comes back on a different
+  monitor than the one its snapshot was taken on; the window appears with a
+  plain cut where it lands.
+- "Restore here" while a scratchpad (special workspace) is open uses the
+  monitor's regular workspace instead of workspace 1.
+
+### Performance
+- The media helper lists MPRIS players with one `ListNames` bus call instead
+  of `busctl list`, which also reported activatable names and resolved every
+  peer's credentials (about 5 ms against 29 ms locally). It queries playback
+  status only for players that match the parked window and finds the window's
+  processes by walking up from the PIDs named by those players, instead of
+  reading the stat file of every process. With four players on the bus and
+  none matching, a pause launches one `busctl` instead of five.
+- `Super+W` no longer resolves the plugin directory: the CLI starts two
+  processes for a park instead of four. Commands that run a sibling helper
+  still resolve it through the `~/.local/bin` link.
+- An unchanged bar anchor is not re-published to the flight overlay on every
+  bar relayout. Label and class sanitizing are about 1.7x faster in a local
+  Node benchmark and each parked entry sanitizes its title once.
+
+### Code
+- The service and flight overlay share two small map-copy helpers
+  (`assoc`/`dissoc`) instead of hand-written copy loops; `Flight.qml` is
+  18 lines shorter. Hyprland event handling moved into a plain service
+  function so the offline suite exercises it directly.
+
+### Tests
+- New regression tests for each fix above (model, service, media helper and
+  CLI wrapper). `tests/bench_helpers.py` counts the processes and times the
+  `Super+W` and media-pause helper paths with stubbed tools.
 
 ## [1.5.2] — 2026-09-30
 
