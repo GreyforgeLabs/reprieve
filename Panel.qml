@@ -636,11 +636,13 @@ Item {
         property string hint: ""
         property string value: ""
         property bool active: false
+        property bool compact: false
+        property bool framed: true
         signal stepped(int direction)
-        height: root.prefHeight
+        height: st.compact ? Style.space(24) : root.prefHeight
         radius: root.innerRadius
-        color: stMouse.containsMouse ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12) : root.faint
-        border.width: 1
+        color: stMouse.containsMouse ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12) : (st.framed ? root.faint : "transparent")
+        border.width: st.framed ? 1 : 0
         border.color: st.active ? Qt.rgba(root.brandAmber.r, root.brandAmber.g, root.brandAmber.b, 0.5) : root.hairline
         Behavior on color { ColorAnimation { duration: 100 } }
         Row {
@@ -1151,32 +1153,56 @@ Item {
 
             PrefStepper {
               width: parent.cell
-              label: "Removal"
-              description: "Animation when parking a window"
-              hint: "F"
-              value: root.parkFlightValue
-              active: root.parkFlightValue !== "off"
-              onStepped: function(direction) { root.cycleFlight("park", direction) }
-            }
-
-            PrefStepper {
-              width: parent.cell
-              label: "Restoration"
-              description: "Animation when restoring a window"
-              hint: "R"
-              value: root.restoreFlightValue
-              active: root.restoreFlightValue !== "off"
-              onStepped: function(direction) { root.cycleFlight("restore", direction) }
-            }
-
-            PrefStepper {
-              width: parent.cell
               label: "Auto-close"
               description: "Close parked windows on a timer"
               hint: "P"
               value: root.timeoutLabel(root.parkTimeoutValue)
               active: root.parkTimeoutValue > 0
               onStepped: function(direction) { root.cycleParkTimeout(direction) }
+            }
+
+            Rectangle {
+              width: parent.cell
+              height: animationControls.implicitHeight + Style.spacing.md * 2
+              radius: root.innerRadius
+              color: root.faint
+              border.width: 1
+              border.color: root.hairline
+
+              Column {
+                id: animationControls
+                anchors { left: parent.left; right: parent.right; top: parent.top; margins: Style.spacing.md }
+                spacing: Style.space(2)
+
+                Text {
+                  text: "Animations"
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.body
+                }
+
+                PrefStepper {
+                  width: parent.width
+                  compact: true
+                  framed: false
+                  label: "Removal"
+                  hint: "F"
+                  value: root.parkFlightValue
+                  active: root.parkFlightValue !== "off"
+                  onStepped: function(direction) { root.cycleFlight("park", direction) }
+                }
+
+                PrefStepper {
+                  width: parent.width
+                  compact: true
+                  framed: false
+                  label: "Restoration"
+                  hint: "R"
+                  value: root.restoreFlightValue
+                  active: root.restoreFlightValue !== "off"
+                  onStepped: function(direction) { root.cycleFlight("restore", direction) }
+                }
+              }
             }
           }
         }
