@@ -618,7 +618,11 @@ Item {
     root.expect(addr, "move")
     // Own dispatches precede Quickshell's cached workspace refresh.
     root.patchSnapshot(addr, { workspace: ws, workspaceKnown: true })
-    root.setNoAnim(addr, true)
+    // With the overlay off, let Hyprland animate the move itself: leaving
+    // the workspace plays the native close animation and the return plays
+    // the open animation. With a flight overlay the snapshot is the
+    // animation, so the real move stays instant.
+    if (root.flight !== "off") root.setNoAnim(addr, true)
     root.hyprDispatch(
       'hl.dsp.window.move({ ' + root.windowSel(addr) + ', workspace = "' + ws + '", follow = false })')
     return true

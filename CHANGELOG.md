@@ -2,6 +2,16 @@
 
 All notable changes to Reprieve. Versions follow SemVer.
 
+
+## [Unreleased]
+
+### Changed
+- `flight: off` no longer cuts the window out of existence. Reprieve stops
+  suppressing Hyprland's animation for the park/restore moves, so the
+  window plays the native close animation on the way out and the native
+  open animation on the way back. With `subtle`/`angel` the snapshot is
+  the animation and the real move stays instant, as before.
+
 ## [1.5.3] — 2026-10-14
 
 ### Fixed

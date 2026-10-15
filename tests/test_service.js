@@ -249,6 +249,17 @@ test("parking with flight off still runs the geometry read before the cut", () =
   const move = dispatches.findIndex(d => d.includes("window.move"))
   assert.ok(pinOff >= 0 && pinOff < move, "the read-gated cut must still unpin with flight off")
 })
+test("flight off lets Hyprland animate the park and restore moves", () => {
+  const {root, dispatches} = service()
+  root.flight = "off"
+  root.parkWindow("0xabc")
+  assert.ok(!dispatches.some(d => d.includes("no_anim")), "no suppression with flight off")
+  root.undoLast()
+  assert.ok(!dispatches.some(d => d.includes("no_anim")), "the restore stays animated too")
+  const other = service()
+  other.root.parkWindow("0xabc"); other.root.flightCut(other.jobs[0].token)
+  assert.ok(other.dispatches.some(d => d.includes('prop = "no_anim"')), "the overlay still suppresses the native move")
+})
 test("early restores cancel an unread park without changing live pin state", () => {
   for (const restore of [s => s.root.undoLast(), s => s.root.restoreAt(0, true),
     s => s.root.restoreAddress("0xabc", false), s => s.root.restoreBySequence(s.root.model.undo[0].sequence, false),

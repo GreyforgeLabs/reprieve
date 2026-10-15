@@ -1160,7 +1160,7 @@ Item {
             PrefStepper {
               width: parent.cell
               label: "Flight"
-              description: root.flightValue === "angel" ? "A winged light carries the window" : (root.flightValue === "subtle" ? "The window glides into the bar" : "Park and restore are a plain cut")
+              description: root.flightValue === "angel" ? "A winged light carries the window" : (root.flightValue === "subtle" ? "The window glides into the bar" : "Hyprland's own close animation plays")
               hint: "F"
               value: root.flightValue
               active: root.flightValue !== "off"

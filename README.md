@@ -104,7 +104,8 @@ Reprieve mark in the bar and the mark flares as it lands; restoring flies
 it back out and the live window takes over the instant it touches down.
 That is `flight: subtle`, the default. `flight: angel` sends a winged light
 swooping down from the mark to carry the window home and bring it back —
-the guardian the plugin is named for. `flight: off` keeps the plain cut.
+the guardian the plugin is named for. `flight: off` skips the overlay and
+lets Hyprland's own close/open animations play on the way out and back.
 Cycle it from the timeline with **F** (Shift+F back) or with
 `reprieve set flight angel`.
 
