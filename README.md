@@ -102,11 +102,24 @@ Two outcomes exist in the timeline, and Reprieve is careful to tell them apart:
 Parking is not a cut. A snapshot of the window lifts off, glides into the
 Reprieve mark in the bar and the mark flares as it lands; restoring flies
 it back out and the live window takes over the instant it touches down.
-That is `flight: subtle`, the default. `flight: angel` sends a winged light
-swooping down from the mark to carry the window home and bring it back —
-the guardian the plugin is named for. `flight: off` keeps the plain cut.
-Cycle it from the timeline with **F** (Shift+F back) or with
-`reprieve set flight angel`.
+The animation can be chosen separately for removal and restoration:
+`off` keeps the plain cut, `subtle` glides the snapshot, and `angel` sends a
+winged light to carry it.
+
+For quiet removal and an angel bringing your window back:
+
+```sh
+reprieve set parkFlight off
+reprieve set restoreFlight angel
+```
+
+The timeline has **Removal** (**F**) and **Restoration** (**R**) controls;
+Shift reverses either cycle. Existing installations keep their shared `flight`
+choice for both directions until changed. `reprieve set flight angel` still
+sets both at once. The default remains `subtle`.
+
+When removal is Off and restoration is animated, Reprieve captures a frame
+silently before parking. No removal flight is shown.
 
 The effect is drawn on an overlay layer that exists only while a flight is
 in the air, never takes input, and never delays anything: the real move
@@ -256,7 +269,9 @@ placed, otherwise under `plugins[]`).
 | `pauseMediaOnPark` | `true`  | Pause supported MPRIS players while hidden; audio without pause support keeps playing |
 | `trackAppClose`    | `true`  | Turn title-bar closes of relaunchable apps into Reopen rows        |
 | `showToast`        | `true`  | Corner notice on park and return (also **T** in the timeline)     |
-| `flight`           | `subtle` | Park/restore effect: `off`, `subtle` (snapshot glides to the bar) or `angel` (winged light carries it) — **F** in the timeline |
+| `flight`           | `subtle` | Shared fallback animation; setting it changes both directions |
+| `parkFlight`       | inherits `flight` | Removal: `off`, `subtle`, or `angel` — **F** in the timeline |
+| `restoreFlight`    | inherits `flight` | Restoration: `off`, `subtle`, or `angel` — **R** in the timeline |
 | `showInBar`        | `true`  | Show the bar widget                                               |
 | `barTray`          | `true`  | Per-window icons in the bar (off = glyph and count)               |
 | `barMaxIcons`      | `5`     | Icons before collapsing into `+N` (1–10)                          |
