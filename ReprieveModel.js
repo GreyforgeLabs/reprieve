@@ -208,6 +208,7 @@ function parkAction(snapshot, sequence, parkedAt) {
     address: normalizeAddress(snapshot.address),
     workspace: normalizeWorkspace(snapshot.workspace),
     floating: !!snapshot.floating,
+    pinned: !!snapshot.pinned,
     fullscreen: clampInt(snapshot.fullscreen, 0, 2, 0),
     fullscreenClient: clampInt(snapshot.fullscreenClient, 0, 2, 0),
     class: klass,
@@ -382,6 +383,7 @@ function redo(state, nowOverride, live) {
     if (liveWs && normalizeAddress(live.address) === action.address && canPark(live, next)) {
       update.workspace = liveWs
       update.floating = !!live.floating
+      update.pinned = !!live.pinned
       update.fullscreen = clampInt(live.fullscreen, 0, 2, 0)
       update.fullscreenClient = clampInt(live.fullscreenClient, 0, 2, 0)
       // Its home is known now, even if it was first recovered without one.
@@ -416,6 +418,7 @@ function undoEffects(action, state, here) {
         workspace: target,
         here: !!hereWs && hereWs !== recorded,
         floating: !!action.floating,
+        pinned: !!action.pinned,
         fullscreen: clampInt(action.fullscreen, 0, 2, 0),
         fullscreenClient: clampInt(action.fullscreenClient, 0, 2, 0),
         class: action.class || "",
@@ -432,6 +435,19 @@ function undoEffects(action, state, here) {
     }]
   }
   return []
+}
+
+// The park geometry read learns the live pinned state after pushPark; the
+// restore must re-pin from what Hyprland actually had, not from the
+// (possibly stale) lastIpcObject the park snapshot was built from.
+function updatePinned(state, address, pinned) {
+  var addr = normalizeAddress(address)
+  if (!addr) return state
+  var idx = findParked(state, addr)
+  if (idx === -1) return state
+  var undo = state.undo.slice()
+  undo[idx] = Object.assign({}, undo[idx], { pinned: !!pinned })
+  return Object.assign({}, state, { undo: undo })
 }
 
 function redoEffects(action, state) {
@@ -714,6 +730,7 @@ function toJournal(state, session) {
       workspace: normalizeWorkspace(a.workspace),
       class: sanitizeClass(a.class),
       floating: !!a.floating,
+      pinned: !!a.pinned,
       fullscreen: clampInt(a.fullscreen, 0, 2, 0),
       fullscreenClient: clampInt(a.fullscreenClient, 0, 2, 0),
       pid: clampInt(a.pid, 0, 4194304, 0),
@@ -763,6 +780,7 @@ function parseJournal(raw, session) {
       workspace: normalizeWorkspace(e.workspace),
       class: sanitizeClass(e.class),
       floating: e.floating === true,
+      pinned: e.pinned === true,
       fullscreen: clampInt(e.fullscreen, 0, 2, 0),
       fullscreenClient: clampInt(e.fullscreenClient, 0, 2, 0),
       pid: clampInt(e.pid, 0, 4194304, 0),
@@ -779,7 +797,7 @@ function parseJournal(raw, session) {
 // Bring three sources into agreement: what we remember (state), what we
 // persisted (journal entries), and what Hyprland actually has (live).
 //
-// live: [{ address, workspace, class, title, pid, floating, fullscreen,
+// live: [{ address, workspace, class, title, pid, floating, pinned, fullscreen,
 //          fullscreenClient }]
 //
 // Rules, in order of trust:
@@ -864,6 +882,7 @@ function reconcile(state, journalEntries, live, journalSequence, nowValue) {
       title: lw2.title || "",
       pid: lw2.pid || 0,
       floating: !!lw2.floating,
+      pinned: !!lw2.pinned,
       fullscreen: 0,
       fullscreenClient: 0,
       recovered: true
@@ -938,6 +957,7 @@ if (typeof module !== "undefined") {
     attachMedia: attachMedia,
     parkedAddresses: parkedAddresses,
     findParked: findParked,
+    updatePinned: updatePinned,
     findBySequence: findBySequence,
     removeBySequence: removeBySequence,
     dropAddress: dropAddress,

@@ -150,6 +150,12 @@ Item {
   function flightCut(token) {
     var pending = root.pendingFlights[String(token)]
     if (!pending) return "unknown"
+    // The watchdog/settler may run before hyprctl replies. A stale pin
+    // snapshot is not safe to cut: abandon this unapplied park instead.
+    if (pending.awaitingRead) {
+      root.abortParkRead(token)
+      return "cancelled"
+    }
     root.pendingFlights = Model.dissoc(root.pendingFlights, String(token))
     try { pending.cut() } catch (e) { console.warn("reprieve: flight cut failed", e) }
     return "ok"
@@ -627,6 +633,17 @@ Item {
       'hl.dsp.window.float({ ' + root.windowSel(addr) + ', action = "' + (floating ? "enable" : "disable") + '" })')
   }
 
+  // A pinned window is fixed to its display: Hyprland silently no-ops a
+  // move to a special workspace, so park must unpin before hiding and the
+  // restore re-pins after floating is back (pin requires a floating window).
+  // window.pin parses "enable"/"disable"/"toggle" like window.float.
+  function setPinned(address, pinned) {
+    var addr = Model.normalizeAddress(address)
+    if (!addr) return
+    root.hyprDispatch(
+      'hl.dsp.window.pin({ ' + root.windowSel(addr) + ', action = "' + (pinned ? "enable" : "disable") + '" })')
+  }
+
   function setFullscreen(address, internal, client) {
     var addr = Model.normalizeAddress(address)
     if (!addr) return
@@ -683,6 +700,7 @@ Item {
       title: String(handle.title || ipc.title || cached.title || ""),
       workspace: cached.workspaceKnown ? cached.workspace : (root.workspaceName(handle.workspace) || ipcWs || cached.workspace || ""),
       floating: cached.floatingKnown ? !!cached.floating : (ipc.floating !== undefined ? !!ipc.floating : !!cached.floating),
+      pinned: !!ipc.pinned,
       fullscreen: Number(ipc.fullscreen !== undefined ? ipc.fullscreen : (cached.fullscreen || 0)),
       fullscreenClient: Number(ipc.fullscreenClient !== undefined ? ipc.fullscreenClient : (cached.fullscreenClient || 0)),
       pid: Number(ipc.pid || cached.pid || 0),
@@ -872,17 +890,22 @@ Item {
   }
 
   function restoreWindow(effect, focus) {
+    var cancelled = root.cancelUnreadPark(effect.address)
     root.settleFlights(effect.address)
     if (!root.liveHandle(effect.address)) {
       root.relaunch(effect)
       return false
     }
+    // Before the read, parking has not touched the real window. Cancelling
+    // it is already the undo; applying a stale restore could change its pin.
+    if (cancelled) return true
     var workspace = Model.normalizeWorkspace(effect.workspace)
     if (!workspace || Model.isSpecialWorkspace(workspace)) workspace = root.currentWorkspace()
     if (!workspace) workspace = "1"
     var cut = function() {
       root.moveSilent(effect.address, workspace)
       root.setFloating(effect.address, !!effect.floating)
+      if (effect.pinned) root.setPinned(effect.address, true)
       if (effect.fullscreen > 0 || effect.fullscreenClient > 0)
         root.setFullscreen(effect.address, effect.fullscreen, effect.fullscreenClient)
       if (focus) root.focusWindow(effect.address)
@@ -957,16 +980,49 @@ Item {
     var cut = function() {
       if (snapshot.fullscreen > 0 || snapshot.fullscreenClient > 0)
         root.setFullscreen(snapshot.address, 0, 0)
+      if (snapshot.pinned) root.setPinned(snapshot.address, false)
       root.moveSilent(snapshot.address, root.parkWorkspace)
       root.requestPause(snapshot)
     }
-    if (root.flight === "off" || !root.flightHandler) { cut(); return }
+    // The cut always waits for the fresh geometry read below: lastIpcObject
+    // is only refreshed when toplevels are fetched, and a pinned window's
+    // move to the park workspace is a silent no-op — the unpin decision and
+    // the journal's pinned flag must come from the read, not the snapshot.
     // lastIpcObject does not track live drag/resize geometry. Reserve the cut
     // now (so early undo can settle it), and read fresh geometry before drawing.
     var token = "f" + (++root.flightSequence)
-    root.pendingFlights = Model.assoc(root.pendingFlights, token, { job: { token: token, kind: "park", address: snapshot.address }, cut: cut, started: Date.now() })
+    var index = Model.findParked(root.model, snapshot.address)
+    var sequence = index === -1 ? -1 : root.model.undo[index].sequence
+    root.pendingFlights = Model.assoc(root.pendingFlights, token, { job: { token: token, kind: "park", address: snapshot.address }, cut: cut, snapshot: snapshot, sequence: sequence, awaitingRead: true, started: Date.now() })
     root.parkReadQueue = root.parkReadQueue.concat([token])
     root.pumpParkReads()
+  }
+
+  // A restore has already removed its model entry. Discard only the
+  // unapplied park; a late response must not hide or reconfigure the window.
+  function cancelUnreadPark(address) {
+    var addr = Model.normalizeAddress(address)
+    var cancelled = false
+    var tokens = Object.keys(root.pendingFlights)
+    for (var i = 0; i < tokens.length; i++) {
+      var pending = root.pendingFlights[tokens[i]]
+      if (pending && pending.awaitingRead && pending.job.address === addr) {
+        root.pendingFlights = Model.dissoc(root.pendingFlights, tokens[i])
+        cancelled = true
+      }
+    }
+    return cancelled
+  }
+
+  function abortParkRead(token) {
+    var pending = root.pendingFlights[String(token)]
+    if (!pending || !pending.awaitingRead) return
+    root.pendingFlights = Model.dissoc(root.pendingFlights, String(token))
+    // Remove this action only, never a later park at the same address.
+    root.commit(Model.removeBySequence(root.model, pending.sequence))
+    root.lastFlightSkip = "pin state unavailable"
+    root.lastResult = "park failed"
+    root.toast("Could not park window — compositor state unavailable")
   }
 
   function pumpParkReads() {
@@ -989,16 +1045,24 @@ Item {
     if (code === 0) {
       try { clients = JSON.parse(String(text || "").slice(0, 1048576)) } catch (e) {}
     }
+    if (!Array.isArray(clients)) clients = []
     var addr = pending.job.address
     var ipc = null
     for (var i = 0; i < clients.length; i++) {
-      if (Model.normalizeAddress(clients[i].address) === addr) { ipc = clients[i]; break }
+      if (clients[i] && Model.normalizeAddress(clients[i].address) === addr) { ipc = clients[i]; break }
     }
+    root.lastParkRead = "code=" + code + ", clients=" + clients.length + ", found=" + !!ipc
+    if (!ipc || typeof ipc.pinned !== "boolean") {
+      root.abortParkRead(token)
+      return
+    }
+    pending.snapshot.pinned = ipc.pinned
+    pending.awaitingRead = false
+    root.commit(Model.updatePinned(root.model, addr, ipc.pinned))
     var handle = root.liveHandle(addr)
     var job = ipc ? root.flightJob("park", handle, addr, ipc) : null
-    root.lastParkRead = "code=" + code + ", clients=" + clients.length + ", found=" + !!ipc
-    if (!job || !root.flightHandler.wants(job)) {
-      root.lastFlightSkip = !job ? "geometry unavailable" : "screen unavailable: " + job.screen
+    if (root.flight === "off" || !job || !root.flightHandler || !root.flightHandler.wants(job)) {
+      root.lastFlightSkip = root.flight === "off" ? "" : (!job ? "geometry unavailable" : "screen unavailable: " + job.screen)
       root.flightCut(token)
       return
     }

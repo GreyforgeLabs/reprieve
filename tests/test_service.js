@@ -4,8 +4,10 @@ const assert = require("node:assert/strict")
 const fs = require("node:fs")
 const vm = require("node:vm")
 const Model = require("../ReprieveModel.js")
-function service() {
-  const handle = {address: "0xabc", title: "Probe", workspace: {name: "2"}, lastIpcObject: {class: "foot", workspace: {name: "2"}, at: [30, 50], size: [600, 400], monitor: 0, pid: 123}}
+function service(options = {}) {
+  const handle = {address: "0xabc", title: "Probe", workspace: {name: "2"}, lastIpcObject: {class: "foot", workspace: {name: "2"}, floating: false, pinned: false, at: [30, 50], size: [600, 400], monitor: 0, pid: 123}}
+  // A real clients response can differ from Quickshell's cached IPC object.
+  const liveClient = options.liveClient ? Object.assign({}, handle.lastIpcObject, options.liveClient, {address: handle.address}) : null
   const jobs = [], dispatches = []
   const root = {model: Model.createState(), snapshots: {}, expected: {}, pendingFlights: {}, flightSequence: 0,
     parkReadQueue: [], currentParkRead: "", parkWorkspace: Model.PARK_WORKSPACE, flight: "angel", session: "", showToast: false,
@@ -19,15 +21,32 @@ function service() {
     focusedWorkspace: {name: "2"}, activeToplevel: handle,
     dispatch(lua) {
       dispatches.push(lua)
+      if (liveClient && lua.includes("window.pin")) {
+        if (lua.includes("disable")) liveClient.pinned = false
+        else if (liveClient.floating) liveClient.pinned = true
+      }
+      if (liveClient && lua.includes("window.float")) liveClient.floating = lua.includes("enable")
       if (lua.includes("window.move")) {
+        if (liveClient && liveClient.pinned) return
         const ws = lua.match(/workspace = "([^"]+)"/)[1]
+        if (liveClient) liveClient.workspace = {name: ws}
         handle.workspace = {name: ws}; handle.lastIpcObject.workspace = {name: ws}
         root.handleMove(handle.address, ws)
       }
     }}
   const parkGeometryReader = {command: []}
-  Object.defineProperty(parkGeometryReader, "running", {get: () => false, set(value) {
-    if (value) root.finishParkRead(root.currentParkRead, JSON.stringify([Object.assign({}, handle.lastIpcObject, {address: handle.address})]), 0)
+  let readerRunning = false
+  function finishRead(text, code = 0) {
+    const token = root.currentParkRead
+    root.currentParkRead = ""
+    readerRunning = false
+    const clients = liveClient ? [liveClient] : [Object.assign({}, handle.lastIpcObject, {address: handle.address})]
+    root.finishParkRead(token, text === undefined ? JSON.stringify(clients) : text, code)
+    root.pumpParkReads()
+  }
+  Object.defineProperty(parkGeometryReader, "running", {get: () => readerRunning, set(value) {
+    readerRunning = value
+    if (value && !options.deferRead) finishRead()
   }})
   const journalWriter = {running: false, payload: "", command: []}
   const context = vm.createContext({root, Model, Hyprland, console, Date, journalWriter,
@@ -44,7 +63,7 @@ function service() {
   vm.runInContext("function timeoutChanged() {" + change[1] + "}", context)
   root.timeoutChanged = context.timeoutChanged
   context.parkTimeout = 5
-  return {root, handle, jobs, dispatches, context, journalWriter}
+  return {root, handle, jobs, dispatches, context, journalWriter, liveClient, finishRead}
 }
 let failures = 0
 function test(name, fn) {try {fn(); console.log("PASS", name)} catch (e) {failures++; console.error("FAIL", name, e.message)}}
@@ -204,5 +223,113 @@ test("re-publishing an unchanged bar anchor keeps the same object", () => {
   root.setBarAnchor("DP-2", 40, 20, 22)
   assert.notEqual(root.barAnchors, first)
   assert.equal(root.barAnchors["DP-2"].x, 40)
+})
+test("parking a pinned window unpins before the move and restore re-pins after floating", () => {
+  const {root, handle, jobs, dispatches} = service()
+  handle.lastIpcObject.pinned = true
+  handle.lastIpcObject.floating = true
+  root.parkWindow("0xabc")
+  root.flightCut(jobs[0].token)
+  const pinOff = dispatches.findIndex(d => d.includes("window.pin") && d.includes("disable"))
+  const move = dispatches.findIndex(d => d.includes("window.move"))
+  assert.ok(pinOff >= 0, "park must unpin a pinned window")
+  assert.ok(pinOff < move, "the unpin must precede the move to the park workspace")
+  root.undoLast()
+  const floatOn = dispatches.findIndex(d => d.includes("window.float") && d.includes("enable"))
+  const pinOn = dispatches.findIndex(d => d.includes("window.pin") && d.includes("enable"))
+  assert.ok(pinOn > floatOn && floatOn > move, "the re-pin must follow the float restore (pin requires a floating window)")
+})
+test("parking with flight off still runs the geometry read before the cut", () => {
+  const {root, handle, dispatches} = service()
+  root.flight = "off"
+  handle.lastIpcObject.pinned = true
+  handle.lastIpcObject.floating = true
+  root.parkWindow("0xabc")
+  const pinOff = dispatches.findIndex(d => d.includes("window.pin") && d.includes("disable"))
+  const move = dispatches.findIndex(d => d.includes("window.move"))
+  assert.ok(pinOff >= 0 && pinOff < move, "the read-gated cut must still unpin with flight off")
+})
+test("early restores cancel an unread park without changing live pin state", () => {
+  for (const restore of [s => s.root.undoLast(), s => s.root.restoreAt(0, true),
+    s => s.root.restoreAddress("0xabc", false), s => s.root.restoreBySequence(s.root.model.undo[0].sequence, false),
+    s => s.root.restoreAll(), s => s.root.resetAll()]) {
+    const s = service({deferRead: true, liveClient: {floating: true, pinned: false}})
+    s.root.flight = "off"
+    s.root.session = "test-session"
+    s.handle.lastIpcObject.pinned = true
+    s.handle.lastIpcObject.floating = true
+    s.root.parkWindow("0xabc")
+    assert.equal(s.dispatches.length, 0)
+    restore(s)
+    s.finishRead()
+    assert.equal(s.liveClient.pinned, false, "the stale cache must not re-pin a window that never moved")
+    assert.equal(s.liveClient.workspace.name, "2")
+    assert.equal(s.dispatches.length, 0, "an unread park has no real-window effects to undo")
+    assert.equal(Model.findParked(s.root.model, "0xabc"), -1)
+    assert.equal(Object.keys(s.root.pendingFlights).length, 0)
+    assert.equal(JSON.parse(s.root.pendingJournalText).entries.length, 0)
+  }
+})
+test("fresh pin state controls deferred park, journal and restore in every flight mode", () => {
+  for (const mode of ["off", "subtle", "angel"]) {
+    const s = service({deferRead: true, liveClient: {floating: true, pinned: true}})
+    s.root.flight = mode
+    s.root.session = "test-session"
+    s.handle.lastIpcObject.floating = true
+    s.root.parkWindow("0xabc")
+    assert.equal(s.dispatches.length, 0)
+    s.finishRead()
+    for (const job of s.jobs) s.root.flightCut(job.token)
+    assert.equal(s.liveClient.workspace.name, Model.PARK_WORKSPACE)
+    assert.equal(s.liveClient.pinned, false)
+    assert.equal(JSON.parse(s.root.pendingJournalText).entries[0].pinned, true)
+    s.root.undoLast()
+    assert.equal(s.liveClient.workspace.name, "2")
+    assert.equal(s.liveClient.pinned, true)
+  }
+})
+test("failed or unusable geometry reads leave the window and journal unparked", () => {
+  for (const [text, code] of [["", 1], ["", 15], ["{broken", 0], ["null", 0], ["{}", 0], ["[]", 0],
+    [JSON.stringify([null, {address: "0xabc"}]), 0]]) {
+    const s = service({deferRead: true, liveClient: {floating: true, pinned: true}})
+    s.root.flight = "off"
+    s.root.session = "test-session"
+    s.root.parkWindow("0xabc")
+    s.finishRead(text, code)
+    assert.equal(s.dispatches.length, 0, "unknown pin state must never reach the cut")
+    assert.equal(s.liveClient.workspace.name, "2")
+    assert.equal(s.liveClient.pinned, true)
+    assert.equal(Model.findParked(s.root.model, "0xabc"), -1)
+    assert.equal(JSON.parse(s.root.pendingJournalText).entries.length, 0)
+    assert.equal(Object.keys(s.root.pendingFlights).length, 0)
+    assert.equal(s.root.lastResult, "park failed")
+  }
+})
+test("a watchdog cut cannot park from an unread pin snapshot", () => {
+  const s = service({deferRead: true, liveClient: {floating: true, pinned: true}})
+  s.root.parkWindow("0xabc")
+  const token = Object.keys(s.root.pendingFlights)[0]
+  s.root.flightCut(token)
+  s.finishRead()
+  assert.equal(s.dispatches.length, 0)
+  assert.equal(Model.findParked(s.root.model, "0xabc"), -1)
+  assert.equal(s.liveClient.workspace.name, "2")
+})
+test("an old read after early undo cannot corrupt a new park of the same window", () => {
+  const s = service({deferRead: true, liveClient: {floating: true, pinned: true}})
+  s.root.flight = "off"
+  s.handle.lastIpcObject.floating = true
+  s.root.parkWindow("0xabc")
+  s.root.undoLast()
+  s.root.parkWindow("0xabc")
+  const sequence = s.root.model.undo[0].sequence
+  s.finishRead("", 1)
+  assert.equal(s.root.model.undo[0].sequence, sequence)
+  assert.equal(s.dispatches.length, 0)
+  s.finishRead()
+  assert.equal(s.liveClient.workspace.name, Model.PARK_WORKSPACE)
+  assert.equal(s.root.model.undo[0].pinned, true)
+  s.root.undoLast()
+  assert.equal(s.liveClient.pinned, true)
 })
 if (failures) process.exit(1)

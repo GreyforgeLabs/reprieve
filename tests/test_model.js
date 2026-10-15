@@ -353,7 +353,7 @@ test("journal round trip persists only recovery data", () => {
   assert.strictEqual(j.session, SESSION)
   assert.strictEqual(j.entries.length, 1)
   const e = j.entries[0]
-  assert.deepStrictEqual(Object.keys(e).sort(), ["address", "class", "floating", "fullscreen", "fullscreenClient", "media", "parkedAt", "pid", "sequence", "workspace"])
+  assert.deepStrictEqual(Object.keys(e).sort(), ["address", "class", "floating", "fullscreen", "fullscreenClient", "media", "parkedAt", "pid", "pinned", "sequence", "workspace"])
   assert.strictEqual(JSON.stringify(j).indexOf("Secret Title"), -1)
   assert.strictEqual(JSON.stringify(j).indexOf("argv"), -1)
   const p = M.parseJournal(JSON.stringify(j), SESSION)
@@ -748,6 +748,58 @@ test("assoc/dissoc return new maps and leave the original untouched", () => {
   assert.deepStrictEqual(map, { a: 1, b: 2 })
   assert.notStrictEqual(M.dissoc(map, "missing"), map)
   assert.deepStrictEqual(M.assoc(undefined, "k", 1), { k: 1 })
+})
+
+test("park keeps the pinned flag and undo re-pins the window", () => {
+  const r = M.pushPark(M.createState(), snap({ floating: true, pinned: true }))
+  assert.strictEqual(r.reason, "parked")
+  assert.strictEqual(r.state.undo[0].pinned, true)
+  const u = M.undo(r.state)
+  assert.strictEqual(u.effects[0].type, "restore")
+  assert.strictEqual(u.effects[0].pinned, true)
+  assert.strictEqual(u.effects[0].floating, true)
+  // Unpinned windows stay unpinned through the round trip.
+  const plain = M.pushPark(M.createState(), snap({ floating: true }))
+  assert.strictEqual(plain.state.undo[0].pinned, false)
+  assert.strictEqual(M.undo(plain.state).effects[0].pinned, false)
+})
+
+test("redo re-parks with the live pinned state", () => {
+  const s = M.undo(M.pushPark(M.createState(), snap({ floating: true, pinned: true })).state).state
+  const live = { address: "0xabc", workspace: "2", class: "google-chrome", title: "Inbox - Gmail", floating: true, fullscreen: 0, fullscreenClient: 0, pid: 4242 }
+  // The user unpinned while visible: the next park must not re-pin.
+  assert.strictEqual(M.redo(s, undefined, Object.assign({}, live, { pinned: false })).action.pinned, false)
+  // A window pinned while visible gets pinned again on restore.
+  const red = M.redo(s, undefined, Object.assign({}, live, { pinned: true }))
+  assert.strictEqual(red.action.pinned, true)
+  assert.strictEqual(M.undoEffects(red.action, red.state, "2")[0].pinned, true)
+})
+
+test("the journal round-trips pinned and tolerates journals without it", () => {
+  let s = M.createState()
+  s = M.pushPark(s, snap({ address: "0x1", floating: true, pinned: true })).state
+  const j = M.toJournal(s, SESSION)
+  assert.strictEqual(j.entries[0].pinned, true)
+  const p = M.parseJournal(JSON.stringify(j), SESSION)
+  assert.strictEqual(p.status, "ok")
+  assert.strictEqual(p.entries[0].pinned, true)
+  // Journals written before pinned existed parse as unpinned.
+  const legacy = JSON.parse(JSON.stringify(j))
+  delete legacy.entries[0].pinned
+  assert.strictEqual(M.parseJournal(JSON.stringify(legacy), SESSION).entries[0].pinned, false)
+})
+
+test("the park geometry read corrects the pinned flag for the restore", () => {
+  // The park snapshot was built from a stale lastIpcObject: pinned=false.
+  let s = M.pushPark(M.createState(), snap({ floating: true })).state
+  assert.strictEqual(s.undo[0].pinned, false)
+  s = M.updatePinned(s, "0xabc", true)
+  assert.strictEqual(s.undo[0].pinned, true)
+  assert.strictEqual(M.undoEffects(s.undo[0], s, "2")[0].pinned, true)
+  // The reverse correction and unknown addresses are safe.
+  s = M.updatePinned(s, "0xabc", false)
+  assert.strictEqual(s.undo[0].pinned, false)
+  assert.strictEqual(M.updatePinned(s, "0xdead", true), s)
 })
 
 console.log("ReprieveModel tests passed (" + passed + ")")
