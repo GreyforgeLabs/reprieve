@@ -36,3 +36,16 @@ for (const time of [.359, .36, .42, .499, .5]) {
   assert.ok(scene.compute_wing().o > .9, `angel vanished during lift at t=${time}`)
 }
 console.log('PASS angel stays visible across the lift/carry handoff')
+
+// A silent park reuses the capture lifecycle, but never starts an animation.
+let finished = 0
+const silent = vm.createContext({park: true, job: {mode: 'off'},
+  scene: {finish() {finished++}}, Qt: {callLater: fn => fn()}, wantFlight: false,
+  stageMapped: true, mapSettle: {start() {throw new Error('silent capture started an animation')}}})
+const startFlight = source.match(/^      function startFlight\(\) \{\n[\s\S]*?^      \}/m)[0]
+vm.runInContext(startFlight, silent)
+silent.startFlight()
+assert.equal(finished, 1)
+assert.equal(silent.wantFlight, false)
+assert.ok(source.includes('opacity: park && job.mode === "off" ? 0 : 1'))
+console.log('PASS capture-only park is invisible and finishes without animation')

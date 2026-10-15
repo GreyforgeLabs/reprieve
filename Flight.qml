@@ -106,7 +106,7 @@ Item {
   function sceneDone(scene) {
     root.scenes = Model.dissoc(root.scenes, scene.job.token)
     root.activeCount = Math.max(0, root.activeCount - 1)
-    root.flown++
+    if (scene.job.mode !== "off") root.flown++
     scene.destroy()
     Qt.callLater(root.prune)
   }
@@ -187,6 +187,7 @@ Item {
       required property var job
       property var frame: null      // the window's ScreencopyView (vault-owned)
       readonly property bool park: job.kind === "park"
+      opacity: park && job.mode === "off" ? 0 : 1
       readonly property bool angel: job.mode === "angel"
       readonly property var rect: job.rect
       readonly property var anchor: root.anchorFor(job.screen)
@@ -321,7 +322,7 @@ Item {
         captureTimeout.stop()
         cut()
         releaseFrame()
-        if ((park || angel) && root.service) root.service.flightLanded(job.address)
+        if ((park || angel) && job.mode !== "off" && root.service) root.service.flightLanded(job.address)
         root.sceneDone(scene)
       }
 
@@ -330,6 +331,8 @@ Item {
       property bool wantFlight: false
       readonly property bool stageMapped: parent && parent.mapped === true
       function startFlight() {
+        // Capture-only park: keep its frame for restore, without a flight.
+        if (park && job.mode === "off") { Qt.callLater(scene.finish); return }
         wantFlight = true
         if (stageMapped) mapSettle.start()
       }

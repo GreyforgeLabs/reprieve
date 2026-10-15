@@ -157,14 +157,15 @@ Item {
     return n >= 60 && n % 60 === 0 ? (n / 60) + " min" : n + " s"
   }
 
-  // Flight steps off -> subtle -> angel (Shift+F back).
-  readonly property string flightValue: service ? Model.normalizeFlight(service.flight) : Model.DEFAULT_FLIGHT
-  function cycleFlight(direction) {
+  // F changes removal; R changes restoration (Shift reverses either).
+  readonly property string parkFlightValue: service ? Model.normalizeFlight(service.parkFlight) : Model.DEFAULT_FLIGHT
+  readonly property string restoreFlightValue: service ? Model.normalizeFlight(service.restoreFlight) : Model.DEFAULT_FLIGHT
+  function cycleFlight(kind, direction) {
     if (!service || typeof service.setSetting !== "function") return
     var modes = Model.FLIGHT_MODES
-    var idx = modes.indexOf(root.flightValue)
+    var idx = modes.indexOf(kind === "restore" ? root.restoreFlightValue : root.parkFlightValue)
     var next = modes[((idx === -1 ? 0 : idx) + (direction < 0 ? -1 : 1) + modes.length) % modes.length]
-    service.setSetting("flight", next)
+    service.setSetting(kind === "restore" ? "restoreFlight" : "parkFlight", next)
   }
 
   function cycleParkTimeout(direction) {
@@ -406,7 +407,8 @@ Item {
           else if (event.key === Qt.Key_T) { if (service && service.toggleShowToast) service.toggleShowToast(); event.accepted = true }
           else if (event.key === Qt.Key_M) { root.togglePauseMedia(); event.accepted = true }
           else if (event.key === Qt.Key_P) { root.cycleParkTimeout(event.modifiers & Qt.ShiftModifier ? -1 : 1); event.accepted = true }
-          else if (event.key === Qt.Key_F) { root.cycleFlight(event.modifiers & Qt.ShiftModifier ? -1 : 1); event.accepted = true }
+          else if (event.key === Qt.Key_R) { root.cycleFlight("restore", event.modifiers & Qt.ShiftModifier ? -1 : 1); event.accepted = true }
+          else if (event.key === Qt.Key_F) { root.cycleFlight("park", event.modifiers & Qt.ShiftModifier ? -1 : 1); event.accepted = true }
           else if (event.key === Qt.Key_S) { root.view = "setup"; event.accepted = true }
         }
       }
@@ -1149,22 +1151,32 @@ Item {
 
             PrefStepper {
               width: parent.cell
+              label: "Removal"
+              description: "Animation when parking a window"
+              hint: "F"
+              value: root.parkFlightValue
+              active: root.parkFlightValue !== "off"
+              onStepped: function(direction) { root.cycleFlight("park", direction) }
+            }
+
+            PrefStepper {
+              width: parent.cell
+              label: "Restoration"
+              description: "Animation when restoring a window"
+              hint: "R"
+              value: root.restoreFlightValue
+              active: root.restoreFlightValue !== "off"
+              onStepped: function(direction) { root.cycleFlight("restore", direction) }
+            }
+
+            PrefStepper {
+              width: parent.cell
               label: "Auto-close"
               description: "Close parked windows on a timer"
               hint: "P"
               value: root.timeoutLabel(root.parkTimeoutValue)
               active: root.parkTimeoutValue > 0
               onStepped: function(direction) { root.cycleParkTimeout(direction) }
-            }
-
-            PrefStepper {
-              width: parent.cell
-              label: "Flight"
-              description: root.flightValue === "angel" ? "A winged light carries the window" : (root.flightValue === "subtle" ? "The window glides into the bar" : "Park and restore are a plain cut")
-              hint: "F"
-              value: root.flightValue
-              active: root.flightValue !== "off"
-              onStepped: function(direction) { root.cycleFlight(direction) }
             }
           }
         }

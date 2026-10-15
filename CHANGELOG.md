@@ -2,6 +2,16 @@
 
 All notable changes to Reprieve. Versions follow SemVer.
 
+## [Unreleased]
+
+### Added
+- Separate removal and restoration animation settings (`parkFlight` and
+  `restoreFlight`). Set removal to Off and restoration to Angel for an instant
+  park followed by an angel bringing the window back. A silent snapshot is
+  retained for restoration, without showing a removal flight.
+- Timeline controls: **F** changes Removal and **R** changes Restoration;
+  Shift reverses the cycle. Existing shared `flight` settings remain compatible.
+
 ## [1.5.3] — 2026-10-14
 
 ### Fixed
