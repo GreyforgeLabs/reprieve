@@ -15,6 +15,11 @@ function service(options = {}) {
     flightPark: job => jobs.push(job), flightRestore: job => jobs.push(job), windowParked() {},
     flightArrived() {}, mediaQueue: [], trackAppClose: false, strandedCount: 0, journalConsumed: true,
     journalDirty: false, pendingJournalText: "", journalBin: "reprieve-journal", stateDir: "/state", barAnchors: {}}
+  // Mirror the QML settings' fallback to the legacy shared flight value.
+  for (const key of ["parkFlight", "restoreFlight"]) {
+    let override
+    Object.defineProperty(root, key, {get: () => override === undefined ? root.flight : override, set: value => { override = value }})
+  }
   const timer = {restart() {}, queue() {}}
   const Hyprland = {toplevels: {values: [handle]}, monitors: {values: [{id: 0, name: "DP-2", x: 0, y: 0, scale: 1}]},
     workspaces: {values: []}, focusedMonitor: null,
@@ -111,7 +116,7 @@ test("enabling a timeout persists the granted grace interval", () => {
 })
 test("setting the current value succeeds without an unnecessary write", () => {
   const {root} = service()
-  root.settingsEntry = {id: "tech.greyforge.reprieve", flight: "angel"}
+  root.settingsEntry = {id: "tech.greyforge.reprieve", flight: "angel", parkFlight: "angel", restoreFlight: "angel"}
   root.pluginId = "tech.greyforge.reprieve"
   root.shell = {updateEntryInline: () => false}
   assert.equal(root.setSetting("flight", "angel"), "ok")
@@ -331,5 +336,64 @@ test("an old read after early undo cannot corrupt a new park of the same window"
   assert.equal(s.root.model.undo[0].pinned, true)
   s.root.undoLast()
   assert.equal(s.liveClient.pinned, true)
+})
+test("removal and restoration modes are independent in all nine combinations", () => {
+  for (const park of ["off", "subtle", "angel"]) for (const restore of ["off", "subtle", "angel"]) {
+    const s = service()
+    s.root.parkFlight = park
+    s.root.restoreFlight = restore
+    s.root.parkWindow("0xabc")
+    const capture = park !== "off" || restore !== "off"
+    assert.equal(s.jobs.length, capture ? 1 : 0, park + "/" + restore)
+    if (capture) {
+      assert.equal(s.jobs[0].kind, "park")
+      assert.equal(s.jobs[0].mode, park, "Off removal must capture without a visible flight")
+      s.root.flightCut(s.jobs[0].token)
+      s.root.flightHandler.remembered = () => ({rect: {x: 30, y: 50, w: 600, h: 400}, screen: "DP-2"})
+    }
+    s.root.undoLast()
+    const restoreJob = s.jobs.find(job => job.kind === "restore")
+    assert.equal(!!restoreJob, restore !== "off", park + "/" + restore)
+    if (restoreJob) {
+      assert.equal(restoreJob.mode, restore)
+      s.root.flightCut(restoreJob.token)
+    }
+    assert.equal(s.handle.workspace.name, "2")
+    assert.equal(Object.keys(s.root.pendingFlights).length, 0)
+  }
+})
+test("early undo cancels a capture-only park before its fresh read", () => {
+  const s = service({deferRead: true, liveClient: {floating: true, pinned: true}})
+  s.root.parkFlight = "off"
+  s.root.restoreFlight = "angel"
+  s.root.parkWindow("0xabc")
+  s.root.undoLast()
+  s.finishRead()
+  assert.equal(s.dispatches.length, 0)
+  assert.equal(s.jobs.length, 0)
+  assert.equal(s.liveClient.pinned, true)
+})
+test("both animation settings persist through the existing settings API", () => {
+  const s = service()
+  s.root.settingsEntry = {id: "tech.greyforge.reprieve", flight: "subtle"}
+  s.root.pluginId = "tech.greyforge.reprieve"
+  s.root.shell = {updateEntryInline: () => true}
+  assert.equal(s.root.setSetting("parkFlight", "off"), "ok")
+  assert.equal(s.root.setSetting("restoreFlight", "angel"), "ok")
+  assert.equal(s.root.settingsEntry.parkFlight, "off")
+  assert.equal(s.root.settingsEntry.restoreFlight, "angel")
+  assert.equal(s.root.settingsEntry.flight, "subtle")
+  assert.equal(s.root.setSetting("restoreFlight", "invalid"), "expected off|subtle|angel")
+})
+test("the legacy shared setting resets both directions even when its value is unchanged", () => {
+  const s = service()
+  s.root.settingsEntry = {id: "tech.greyforge.reprieve", flight: "subtle", parkFlight: "off", restoreFlight: "angel"}
+  s.root.pluginId = "tech.greyforge.reprieve"
+  let writes = 0
+  s.root.shell = {updateEntryInline: () => { writes++; return true }}
+  assert.equal(s.root.setSetting("flight", "subtle"), "ok")
+  assert.equal(s.root.settingsEntry.parkFlight, "subtle")
+  assert.equal(s.root.settingsEntry.restoreFlight, "subtle")
+  assert.equal(writes, 1)
 })
 if (failures) process.exit(1)

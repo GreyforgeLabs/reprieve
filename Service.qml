@@ -36,6 +36,8 @@ Item {
   readonly property bool setupDismissed: setting("setupDismissed", false) === true
   // Park/restore effect: off | subtle | angel (see Model.normalizeFlight).
   readonly property string flight: Model.normalizeFlight(setting("flight", Model.DEFAULT_FLIGHT))
+  readonly property string parkFlight: Model.normalizeFlight(setting("parkFlight", flight))
+  readonly property string restoreFlight: Model.normalizeFlight(setting("restoreFlight", flight))
   // Bar widget preferences (also overridable per layout entry in shell.json).
   readonly property bool barTray: setting("barTray", true) !== false
   readonly property int barMaxIcons: Math.max(1, Math.min(10, Math.floor(Number(setting("barMaxIcons", 5)) || 5)))
@@ -107,15 +109,22 @@ Item {
     return null
   }
 
-  // A flight job for a live window, or null when flights are off, nobody
-  // draws them, or the window's place on screen is unknown. A park reads
+  // A flight job for a live window, or null when neither direction needs
+  // a frame, nobody draws them, or geometry is unknown. An Off park may
+  // capture silently for an animated restore. A park reads
   // the window's geometry from Hyprland; a restore asks the overlay for the
   // place it remembers from the park (the live geometry is the park
   // workspace's).
+  function animationMode(kind) {
+    return kind === "restore" ? root.restoreFlight : root.parkFlight
+  }
+
   function flightJob(kind, handle, address, freshIpc) {
-    if (root.flight === "off" || !root.flightHandler || !handle) return null
+    var mode = root.animationMode(kind)
+    // An Off park still captures a frame when restoration needs one.
+    if ((mode === "off" && (kind === "restore" || root.restoreFlight === "off")) || !root.flightHandler || !handle) return null
     var addr = Model.normalizeAddress(address)
-    var job = { token: "f" + (++root.flightSequence), kind: kind, mode: root.flight, address: addr, handle: handle }
+    var job = { token: "f" + (++root.flightSequence), kind: kind, mode: mode, address: addr, handle: handle }
     if (kind === "restore") {
       var mem = null
       try { mem = root.flightHandler.remembered(addr) } catch (e) {}
@@ -303,7 +312,7 @@ Item {
       showToast: "bool", pauseMediaOnPark: "bool", trackAppClose: "bool",
       showInBar: "bool", barTray: "bool", hideBarWhenIdle: "bool",
       maxStack: "int", barMaxIcons: "int", setupDismissed: "bool",
-      parkTimeout: "int", flight: "flight"
+      parkTimeout: "int", flight: "flight", parkFlight: "flight", restoreFlight: "flight"
     }
     var kind = allowed[String(name)]
     if (!kind) return "unknown setting"
@@ -346,8 +355,10 @@ Item {
       if (!root.shell || typeof root.shell.updateEntryInline !== "function") return false
       var next = root.pluginEntry()
       // Omarchy reports false for a write that changes nothing.
-      if (next[name] === value) return true
+      if (next[name] === value && (name !== "flight" || (next.parkFlight === value && next.restoreFlight === value))) return true
       next[name] = value
+      // The legacy shared setting still changes both directions atomically.
+      if (name === "flight") { next.parkFlight = value; next.restoreFlight = value }
       if (root.shell.updateEntryInline(root.pluginId, next) === false) return false
       // Reflect accepted changes immediately; the watcher confirms shortly after.
       root.settingsEntry = next
@@ -1061,8 +1072,8 @@ Item {
     root.commit(Model.updatePinned(root.model, addr, ipc.pinned))
     var handle = root.liveHandle(addr)
     var job = ipc ? root.flightJob("park", handle, addr, ipc) : null
-    if (root.flight === "off" || !job || !root.flightHandler || !root.flightHandler.wants(job)) {
-      root.lastFlightSkip = root.flight === "off" ? "" : (!job ? "geometry unavailable" : "screen unavailable: " + job.screen)
+    if (!job || !root.flightHandler || !root.flightHandler.wants(job)) {
+      root.lastFlightSkip = root.parkFlight === "off" ? "" : (!job ? "geometry unavailable" : "screen unavailable: " + job.screen)
       root.flightCut(token)
       return
     }
@@ -1401,7 +1412,7 @@ Item {
     summary.entry = root.entryLocation
     summary.bar = { placed: root.entryLocation === "bar", show: root.showInBar, tray: root.barTray, hideWhenIdle: root.hideBarWhenIdle, maxIcons: root.barMaxIcons }
     summary.journal = root.journalStatus
-    summary.flight = { frames: root.flightHandler ? Object.keys(root.flightHandler.memory).length : 0, lastSkip: root.lastFlightSkip, lastRead: root.lastParkRead, screens: root.flightHandler ? Object.keys(root.flightHandler.containers) : [], active: root.flightHandler ? root.flightHandler.activeCount : 0, mode: root.flight, handler: !!root.flightHandler, pending: Object.keys(root.pendingFlights).length, flown: root.flightHandler ? Number(root.flightHandler.flown || 0) : 0, anchors: root.barAnchors }
+    summary.flight = { parkMode: root.parkFlight, restoreMode: root.restoreFlight, frames: root.flightHandler ? Object.keys(root.flightHandler.memory).length : 0, lastSkip: root.lastFlightSkip, lastRead: root.lastParkRead, screens: root.flightHandler ? Object.keys(root.flightHandler.containers) : [], active: root.flightHandler ? root.flightHandler.activeCount : 0, mode: root.flight, handler: !!root.flightHandler, pending: Object.keys(root.pendingFlights).length, flown: root.flightHandler ? Number(root.flightHandler.flown || 0) : 0, anchors: root.barAnchors }
     summary.session = root.session ? root.session.slice(0, 12) : ""
     summary.binds = root.bindsStatus ? !!root.bindsStatus.installed : null
     summary.parkTimeout = root.parkTimeout
