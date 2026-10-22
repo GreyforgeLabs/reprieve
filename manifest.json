@@ -23,6 +23,23 @@
     "description": "Parked windows: count, per-window icons to restore, setup/health indicator. Click for the timeline.",
     "category": "System",
     "allowMultiple": false,
-    "defaultSection": "right"
+    "defaultSection": "right",
+    "defaults": {
+      "barAccent": "brand"
+    },
+    "schema": [
+      {
+        "key": "barAccent",
+        "type": "enum",
+        "label": "Widget colours",
+        "options": [
+          "brand",
+          "theme",
+          "accent"
+        ],
+        "defaultValue": "brand",
+        "description": "Brand keeps Reprieve's cyan angel and amber markers. Theme makes it two-tone like the other bar icons: wings in the bar text colour, halo and parked markers in your Omarchy accent. Accent paints the whole angel in the accent. Alerts still use the theme's urgent colour. Options: brand, theme (bar text + accent), accent (solid accent)."
+      }
+    ]
   }
 }
