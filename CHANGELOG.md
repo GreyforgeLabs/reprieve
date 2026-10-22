@@ -2,6 +2,16 @@
 
 All notable changes to Reprieve. Versions follow SemVer.
 
+## [Unreleased]
+
+### Added
+- Bar widget colour option (`barAccent`): `brand` keeps the cyan angel and
+  amber markers, `theme` makes the mark two-tone like other bar icons (wings
+  in the bar text colour, halo and parked markers in the theme accent), and
+  `accent` paints the whole mark in the accent. Alerts keep the urgent colour.
+  `reprieve bar theme on|off` and `reprieve bar accent on|off` switch it;
+  `reprieve bar status` reports it.
+
 ## [1.5.5] — 2026-10-25
 
 ### Fixed

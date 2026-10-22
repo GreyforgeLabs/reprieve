@@ -114,6 +114,20 @@ test("enabling a timeout persists the granted grace interval", () => {
   assert.ok(root.pendingJournalText, "grace timestamp was not journaled")
   assert.equal(JSON.parse(root.pendingJournalText).entries[0].parkedAt, root.model.undo[0].parkedAt)
 })
+
+test("bar accent accepts brand|theme|accent and persists it", () => {
+  const {root} = service()
+  root.settingsEntry = {id: "tech.greyforge.reprieve"}
+  root.pluginId = "tech.greyforge.reprieve"
+  root.shell = {updateEntryInline: () => true}
+  assert.equal(root.setSetting("barAccent", "theme"), "ok")
+  assert.equal(root.settingsEntry.barAccent, "theme")
+  assert.equal(root.setSetting("barAccent", "THEME"), "ok")
+  assert.equal(root.setSetting("barAccent", "accent"), "ok")
+  assert.equal(root.settingsEntry.barAccent, "accent")
+  assert.equal(root.setSetting("barAccent", "cyan"), "expected brand|theme|accent")
+})
+
 test("setting the current value succeeds without an unnecessary write", () => {
   const {root} = service()
   root.settingsEntry = {id: "tech.greyforge.reprieve", flight: "angel", parkFlight: "angel", restoreFlight: "angel"}

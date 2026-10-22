@@ -63,11 +63,12 @@ Usage: reprieve <command>
   remove-binds  Remove Reprieve's keybinding block
   uninstall     Restore parked windows and remove keybindings
   bar           Bar widget: status | install [left|center|right] |
-                show on|off | tray on|off | hide-idle on|off | icons N
+                show on|off | tray on|off | hide-idle on|off | icons N |
+                theme on|off | accent on|off
   set KEY VALUE Change a setting (maxStack, parkTimeout, flight, parkFlight,
                 restoreFlight, pauseMediaOnPark,
                 trackAppClose, showToast, showInBar, barTray, hideBarWhenIdle,
-                barMaxIcons)
+                barMaxIcons, barAccent)
   doctor        Check the installation without changing anything
 USAGE
 }
@@ -86,6 +87,7 @@ print("placed in bar   " + ("yes" if b.get("placed") else "no (run: reprieve bar
 print("show            " + ("on" if b.get("show", True) else "off"))
 print("tray icons      " + ("on" if b.get("tray", True) else "off") + " (max " + str(b.get("maxIcons", 5)) + ")")
 print("hide when idle  " + ("on" if b.get("hideWhenIdle", False) else "off"))
+print("colours         " + {"theme": "two-tone (bar text + accent)", "accent": "theme accent (solid)"}.get(b.get("accent"), "brand (cyan and amber)"))
 t = d.get("parkTimeout") or 0
 print("park timeout    " + ("off (reprieve set parkTimeout N)" if not t else str(t) + " s"))
 print("parked          " + str(d.get("parked", 0)))'
@@ -134,7 +136,21 @@ for k, v in (json.load(sys.stdin) or {}).items():
     tray)      need_plugin setSetting barTray "${1:-on}" ;;
     hide-idle) need_plugin setSetting hideBarWhenIdle "${1:-on}" ;;
     icons)     need_plugin setSetting barMaxIcons "${1:-5}" ;;
-    *) echo "usage: reprieve bar status|install [section]|show on|off|tray on|off|hide-idle on|off|icons N" >&2; exit 2 ;;
+    theme)
+      case "${1:-on}" in
+        on|true|yes|theme) need_plugin setSetting barAccent theme ;;
+        off|false|no|brand) need_plugin setSetting barAccent brand ;;
+        *) echo "reprieve: expected theme on|off" >&2; exit 2 ;;
+      esac
+      ;;
+    accent)
+      case "${1:-on}" in
+        on|true|yes|accent) need_plugin setSetting barAccent accent ;;
+        off|false|no|brand) need_plugin setSetting barAccent brand ;;
+        *) echo "reprieve: expected accent on|off" >&2; exit 2 ;;
+      esac
+      ;;
+    *) echo "usage: reprieve bar status|install [section]|show on|off|tray on|off|hide-idle on|off|icons N|theme on|off|accent on|off" >&2; exit 2 ;;
   esac
 }
 

@@ -86,6 +86,16 @@ function normalizeFlight(value) {
   return FLIGHT_MODES.indexOf(v) === -1 ? DEFAULT_FLIGHT : v
 }
 
+// Bar widget accent: the fixed Greyforge cyan and amber, a two-tone theme
+// mark (bar text + theme accent), or a solid theme accent. Anything
+// unrecognised keeps the brand colours.
+var BAR_ACCENTS = ["brand", "theme", "accent"]
+var DEFAULT_BAR_ACCENT = "brand"
+function normalizeBarAccent(value) {
+  var v = String(value === undefined || value === null ? "" : value).trim().toLowerCase()
+  return BAR_ACCENTS.indexOf(v) === -1 ? DEFAULT_BAR_ACCENT : v
+}
+
 // Parked-at stamps, floored to whole milliseconds. Entries without a
 // positive stamp predate the timeout feature and are exempt from expiry.
 function stampMs(value) {
@@ -935,6 +945,9 @@ if (typeof module !== "undefined") {
     FLIGHT_MODES: FLIGHT_MODES,
     DEFAULT_FLIGHT: DEFAULT_FLIGHT,
     normalizeFlight: normalizeFlight,
+    BAR_ACCENTS: BAR_ACCENTS,
+    DEFAULT_BAR_ACCENT: DEFAULT_BAR_ACCENT,
+    normalizeBarAccent: normalizeBarAccent,
     createState: createState,
     cloneState: cloneState,
     normalizeAddress: normalizeAddress,

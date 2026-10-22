@@ -37,13 +37,32 @@ BarWidget {
   readonly property int maxIcons: Math.max(1, Math.min(10, Math.floor(Number(setting("maxIcons", service ? service.barMaxIcons : 5)) || 5)))
   readonly property bool hideWhenIdle: setting("hideWhenIdle", service ? service.hideBarWhenIdle : false) !== false
   readonly property bool showInBar: setting("showInBar", service ? service.showInBar : true) !== false
+  // brand keeps the Greyforge cyan and amber. theme matches the bar: wings in
+  // the bar foreground, halo and state markers in the theme accent. accent
+  // paints the whole mark in the accent. Alerts always use the urgent colour.
+  readonly property string accentMode: Model.normalizeBarAccent(setting("barAccent", service ? service.barAccent : Model.DEFAULT_BAR_ACCENT))
+  readonly property bool themed: accentMode === "theme"
+  readonly property bool monoAccent: accentMode === "accent"
+  readonly property bool recolored: themed || monoAccent
   readonly property var trayEntries: tray ? parkedEntries.slice(0, maxIcons) : []
   readonly property int overflow: tray ? Math.max(0, parked - maxIcons) : parked
   readonly property real iconSize: Style.bar.iconCanvas
   readonly property color foreground: bar ? bar.barForeground : Color.bar.text
   readonly property color brandAmber: "#fda52b"
   readonly property color brandCyan: "#38c8e8"
+  // Wings (theme: bar text, accent: the accent itself).
+  readonly property color markColor: themed ? foreground : (monoAccent ? Color.accent : brandCyan)
+  // Halo and state accents.
+  readonly property color detailColor: recolored ? Color.accent : brandCyan
+  readonly property color parkedColor: recolored ? Color.accent : brandAmber
+  // Chrome around the per-window icons: subtle bar text in two-tone mode.
+  readonly property color chromeColor: themed ? foreground : (monoAccent ? Color.accent : brandCyan)
   property bool pulse: false
+
+  // Black or white, whichever stays readable on a filled badge.
+  function readableOn(c) {
+    return (0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b) > 0.55 ? "#1a1206" : "#f7f3ea"
+  }
 
   visible: showInBar && (service ? (parked > 0 || attention || !hideWhenIdle) : !hideWhenIdle)
   implicitWidth: vertical ? barSize : layout.implicitWidth
@@ -133,7 +152,9 @@ BarWidget {
         anchors.horizontalCenterOffset: root.vertical || root.overflow === 0 ? 0 : -Style.space(3)
         size: root.iconSize + Style.space(2)
         surface: bar ? bar.background : Color.bar.background
-        dot: root.attention ? (bar ? bar.urgent : Color.urgent) : root.brandAmber
+        tint: root.recolored ? root.markColor : "transparent"
+        halo: root.recolored ? root.detailColor : "transparent"
+        dot: root.attention ? (bar ? bar.urgent : Color.urgent) : root.parkedColor
         showDot: root.parked > 0 || root.attention
         scale: root.pulse ? 1.15 : 1
         Behavior on scale { NumberAnimation { duration: 180; easing.type: Easing.OutBack } }
@@ -141,6 +162,7 @@ BarWidget {
 
       // Count badge
       Rectangle {
+        id: badge
         visible: root.overflow > 0
         anchors.right: parent.right
         anchors.bottom: parent.bottom
@@ -149,13 +171,13 @@ BarWidget {
         width: Math.max(height, badgeText.implicitWidth + Style.space(5))
         height: Style.font.caption + Style.space(3)
         radius: height / 2
-        color: root.attention ? (bar ? bar.urgent : Color.urgent) : root.brandAmber
+        color: root.attention ? (bar ? bar.urgent : Color.urgent) : root.parkedColor
         Text {
           id: badgeText
           anchors.centerIn: parent
           text: (root.tray ? "+" : "") + root.overflow
           textFormat: Text.PlainText
-          color: "#1a1206"
+          color: root.readableOn(badge.color)
           font.family: bar ? bar.fontFamily : Style.font.family
           font.pixelSize: Style.font.caption
           font.bold: true
@@ -194,7 +216,7 @@ BarWidget {
           radius: Math.max(Style.space(4), Math.min(Style.cornerRadius, Style.space(6)))
           color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, slot.hovered ? 0.14 : 0.07)
           border.width: 1
-          border.color: Qt.rgba(root.brandCyan.r, root.brandCyan.g, root.brandCyan.b, slot.hovered ? 0.7 : 0.3)
+          border.color: Qt.rgba(root.chromeColor.r, root.chromeColor.g, root.chromeColor.b, slot.hovered ? 0.7 : 0.3)
           Behavior on color { ColorAnimation { duration: 120 } }
         }
 
@@ -225,7 +247,7 @@ BarWidget {
           width: Style.space(5)
           height: width
           radius: width / 2
-          color: modelData.recovered ? root.brandCyan : root.brandAmber
+          color: modelData.recovered ? root.detailColor : root.parkedColor
           border.width: 1
           border.color: bar ? bar.background : Color.bar.background
         }

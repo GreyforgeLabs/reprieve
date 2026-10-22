@@ -504,6 +504,18 @@ test("flight is subtle by default and only accepts off|subtle|angel", () => {
   assert.strictEqual(M.normalizeFlight(true), "subtle")
 })
 
+test("bar accent is brand by default and only accepts brand|theme|accent", () => {
+  assert.deepStrictEqual(M.BAR_ACCENTS, ["brand", "theme", "accent"])
+  assert.strictEqual(M.DEFAULT_BAR_ACCENT, "brand")
+  assert.strictEqual(M.normalizeBarAccent(undefined), "brand")
+  assert.strictEqual(M.normalizeBarAccent(""), "brand")
+  assert.strictEqual(M.normalizeBarAccent("Theme "), "theme")
+  assert.strictEqual(M.normalizeBarAccent("THEME"), "theme")
+  assert.strictEqual(M.normalizeBarAccent("Accent"), "accent")
+  assert.strictEqual(M.normalizeBarAccent("cyan"), "brand")
+  assert.strictEqual(M.normalizeBarAccent(true), "brand")
+})
+
 test("parkTimeout is off by default and clamps to 5-120", () => {
   assert.strictEqual(M.DEFAULT_PARK_TIMEOUT, 0)
   assert.strictEqual(M.MIN_PARK_TIMEOUT, 5)
