@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">Reprieve — halo</title>
+  <desc id="desc">White halo mask, the top ring of the guardian wings mark. Tint it separately to keep the mark two-tone.</desc>
+
+  <ellipse cx="32" cy="10.5" rx="8.5" ry="3" fill="none" stroke="#FFFFFF" stroke-width="2.8"/>
+</svg>

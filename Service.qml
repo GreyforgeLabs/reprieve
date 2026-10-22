@@ -41,6 +41,10 @@ Item {
   // Bar widget preferences (also overridable per layout entry in shell.json).
   readonly property bool barTray: setting("barTray", true) !== false
   readonly property int barMaxIcons: Math.max(1, Math.min(10, Math.floor(Number(setting("barMaxIcons", 5)) || 5)))
+  // brand keeps Greyforge cyan and amber; theme makes the mark two-tone
+  // (bar text + accent); accent paints it in the accent (see
+  // Model.normalizeBarAccent).
+  readonly property string barAccent: Model.normalizeBarAccent(setting("barAccent", Model.DEFAULT_BAR_ACCENT))
   // The mark stays in the bar at all times so the safety net is visible
   // even when idle; users can still fade it with hideBarWhenIdle.
   readonly property bool hideBarWhenIdle: setting("hideBarWhenIdle", false) !== false
@@ -312,6 +316,7 @@ Item {
       showToast: "bool", pauseMediaOnPark: "bool", trackAppClose: "bool",
       showInBar: "bool", barTray: "bool", hideBarWhenIdle: "bool",
       maxStack: "int", barMaxIcons: "int", setupDismissed: "bool",
+      barAccent: "barAccent",
       parkTimeout: "int", flight: "flight", parkFlight: "flight", restoreFlight: "flight"
     }
     var kind = allowed[String(name)]
@@ -321,6 +326,9 @@ Item {
     if (kind === "flight") {
       if (Model.FLIGHT_MODES.indexOf(String(rawValue).trim().toLowerCase()) === -1) return "expected off|subtle|angel"
       value = Model.normalizeFlight(rawValue)
+    } else if (kind === "barAccent") {
+      if (Model.BAR_ACCENTS.indexOf(String(rawValue).trim().toLowerCase()) === -1) return "expected brand|theme|accent"
+      value = Model.normalizeBarAccent(rawValue)
     } else if (kind === "bool") {
       var s = String(rawValue).toLowerCase()
       if (s === "true" || s === "on" || s === "1" || s === "yes") value = true
@@ -1410,7 +1418,7 @@ Item {
     summary.stranded = root.strandedCount
     summary.attention = root.attentionReason
     summary.entry = root.entryLocation
-    summary.bar = { placed: root.entryLocation === "bar", show: root.showInBar, tray: root.barTray, hideWhenIdle: root.hideBarWhenIdle, maxIcons: root.barMaxIcons }
+    summary.bar = { placed: root.entryLocation === "bar", show: root.showInBar, tray: root.barTray, hideWhenIdle: root.hideBarWhenIdle, maxIcons: root.barMaxIcons, accent: root.barAccent }
     summary.journal = root.journalStatus
     summary.flight = { parkMode: root.parkFlight, restoreMode: root.restoreFlight, frames: root.flightHandler ? Object.keys(root.flightHandler.memory).length : 0, lastSkip: root.lastFlightSkip, lastRead: root.lastParkRead, screens: root.flightHandler ? Object.keys(root.flightHandler.containers) : [], active: root.flightHandler ? root.flightHandler.activeCount : 0, mode: root.flight, handler: !!root.flightHandler, pending: Object.keys(root.pendingFlights).length, flown: root.flightHandler ? Number(root.flightHandler.flown || 0) : 0, anchors: root.barAnchors }
     summary.session = root.session ? root.session.slice(0, 12) : ""

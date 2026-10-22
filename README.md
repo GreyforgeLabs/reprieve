@@ -170,6 +170,19 @@ has three parts:
   it home, right-click pulls it to the current workspace;
 - a `+N` overflow once more windows are hidden than icons shown.
 
+The cyan angel and amber markers are Greyforge's brand colours, so they stand
+apart from the rest of the bar. Most bar icons draw in the bar's text colour
+and reserve the theme accent for state and detail; `reprieve bar theme on`
+does the same with the Reprieve mark — wings in the bar text colour, halo and
+parked markers in the active Omarchy accent. The attention colour still comes
+from the theme's urgent colour. Prefer a single colour? `reprieve bar accent
+on` paints the whole angel in the accent. Switch back with `reprieve bar theme
+off` (or `reprieve bar accent off`).
+
+<p align="center">
+  <img src="docs/screenshots/bar-colours.png" alt="The Reprieve bar widget in brand, two-tone and accent colours" width="680">
+</p>
+
 Left-click the mark for the timeline, right-click to bring back the latest
 window, middle-click to bring back all of them. The mark swells when a
 window is parked. The widget stays in the bar at all times — the safety
@@ -180,6 +193,8 @@ reprieve bar status            # placement and toggles
 reprieve bar hide-idle on     # fade out when there is nothing to show
 reprieve bar tray off         # mark and count only
 reprieve bar icons 8          # icons before collapsing to +N (1–10)
+reprieve bar theme on          # two-tone: bar text wings, accent halo/markers
+reprieve bar accent on         # solid theme accent angel
 reprieve bar show off         # remove from the bar; the service keeps running
 reprieve bar install center   # place it, or move it to another section
 ```
@@ -275,6 +290,7 @@ placed, otherwise under `plugins[]`).
 | `showInBar`        | `true`  | Show the bar widget                                               |
 | `barTray`          | `true`  | Per-window icons in the bar (off = glyph and count)               |
 | `barMaxIcons`      | `5`     | Icons before collapsing into `+N` (1–10)                          |
+| `barAccent`        | `brand` | Widget colours: `brand` keeps the cyan angel and amber markers, `theme` is two-tone (bar text wings, accent halo and markers), `accent` is solid accent (alerts stay urgent) |
 | `hideBarWhenIdle`  | `false` | Fade the widget out when nothing is hidden and nothing needs attention (`true` restores hide-when-idle) |
 
 ```json
