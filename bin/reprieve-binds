@@ -163,8 +163,7 @@ def write_config_atomic(path: str, text: str) -> str | None:
     check_config(path, must_exist=False)
     backup = None
     if os.path.lexists(path):
-        backup = f"{path}.bak.{time.strftime('%Y%m%d%H%M%S')}"
-        shutil.copy2(path, backup)
+        backup = make_backup(path)
         mode = stat.S_IMODE(os.lstat(path).st_mode)
     else:
         mode = 0o644
@@ -190,11 +189,41 @@ def write_config_atomic(path: str, text: str) -> str | None:
     return backup
 
 
+def make_backup(path: str) -> str:
+    """Copy path to a new timestamped backup. Two writes within the same
+    second (an install followed by a quick re-install with an alternate key)
+    get distinct names, so the earlier backup is never overwritten."""
+    stamp = time.strftime("%Y%m%d%H%M%S")
+    for n in range(100):
+        candidate = f"{path}.bak.{stamp}" + (f".{n}" if n else "")
+        try:
+            fd = os.open(candidate, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+        except FileExistsError:
+            continue
+        try:
+            with os.fdopen(fd, "wb") as out, open(path, "rb") as src:
+                shutil.copyfileobj(src, out)
+            shutil.copystat(path, candidate)
+        except BaseException:
+            try:
+                os.unlink(candidate)
+            except OSError:
+                pass
+            raise
+        return candidate
+    raise BindError(f"could not create a backup of {path}")
+
+
 def prune_backups(path: str, keep: int = 5) -> None:
     """Every install/remove leaves a timestamped backup; keep only the recent
     ones so ~/.config/hypr does not fill with them over time."""
+    def order(name: str) -> tuple[str, int]:
+        # bindings.lua.bak.<stamp>[.<n>]: same-second backups by their number.
+        stamp, _, n = name[len(path) + 5:].partition(".")
+        return stamp, int(n) if n.isdigit() else 0
+
     try:
-        cands = sorted(glob.glob(path + ".bak.*"))
+        cands = sorted(glob.glob(path + ".bak.*"), key=order)
     except OSError:
         return
     for old in cands[: max(0, len(cands) - keep)]:
@@ -405,11 +434,11 @@ def status(path: str) -> dict:
 def install(path: str, overrides: dict[str, str], skip: set[str], replace: set[str], reload: bool) -> dict:
     result = {"status": "ok", "installed": False, "keys": {}, "skipped": [], "conflicts": [],
               "backup": None, "reloaded": False, "verified": {}, "unbound": []}
-    text = read_config(path)
-    if has_dangling_marker(text, PLUGIN_ID):
+    original = read_config(path)
+    if has_dangling_marker(original, PLUGIN_ID):
         raise BindError("bindings.lua has an unbalanced Reprieve marker block; repair it by hand first")
 
-    text, _ = strip_blocks(text, PLUGIN_ID)
+    text, _ = strip_blocks(original, PLUGIN_ID)
     user_text = text_outside_blocks(text)
 
     binds = live_binds()
@@ -459,7 +488,10 @@ def install(path: str, overrides: dict[str, str], skip: set[str], replace: set[s
         new_text = block
     else:
         new_text = text + ("\n" if text.endswith("\n") else "\n\n") + block
-    result["backup"] = write_config_atomic(path, new_text)
+    # A reinstall that changes nothing writes nothing: no backup churn that
+    # would prune the older ones.
+    if new_text != original:
+        result["backup"] = write_config_atomic(path, new_text)
     result["installed"] = True
     result["keys"] = {a: pretty_key(k) for a, k in keys.items()}
 

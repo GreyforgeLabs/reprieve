@@ -17,6 +17,12 @@ All notable changes to Reprieve. Versions follow SemVer.
 - `reprieve bar status` with the shell stopped prints the usual "plugin is
   not running" message instead of a Python traceback, and reports
   hide-when-idle as off when the service omits it (the setting's default).
+- Two `bindings.lua` writes within the same second (an install followed by
+  a quick reinstall with an alternate key, say) no longer share one backup
+  name, which made the second backup overwrite the first. Same-second
+  backups get a numbered suffix and are pruned in order.
+- Reinstalling bindings that are already current writes nothing, so it no
+  longer adds a backup that pushes an older one out of the five kept.
 
 ## [1.5.4] — 2026-10-19
 

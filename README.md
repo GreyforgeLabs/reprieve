@@ -60,7 +60,9 @@ only path that writes to `~/.config/hypr/bindings.lua`, and pressing
 **Enable Protection** (click, or Enter once the card has settled) does exactly
 this:
 
-1. Copies your `bindings.lua` to a timestamped backup.
+1. Copies your `bindings.lua` to a timestamped backup next to it; the five
+   most recent backups are kept. A reinstall that would change nothing
+   writes nothing.
 2. Appends a single fenced block, `-- BEGIN tech.greyforge.reprieve` through
    `-- END tech.greyforge.reprieve`, via temp-file-and-rename so a crash
    mid-write cannot leave you with half a file.

@@ -8,7 +8,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import importlib.machinery
+import importlib.util
 from pathlib import Path
+from unittest.mock import patch
 
 BINDS = Path(__file__).resolve().parents[1] / "bin" / "reprieve-binds"
 PLUGIN_ID = "tech.greyforge.reprieve"
@@ -123,6 +126,33 @@ class BindTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(self.config.read_text(), first)
         self.assertEqual(self.config.read_text().count(BEGIN), 1)
+
+    def test_unchanged_reinstall_leaves_no_new_backup(self):
+        # Reinstalling the same bindings rewrites nothing, so it cannot push
+        # an older backup out of the pruned set.
+        self.config.write_text(USER_CONFIG)
+        run("install", config=self.config, home=self.home)
+        rc, out = run("install", config=self.config, home=self.home)
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(out["installed"])
+        self.assertIsNone(out["backup"])
+        self.assertEqual(len(self.backups()), 1)
+        self.assertEqual(self.backups()[0].read_text(), USER_CONFIG)
+
+    def test_backups_in_the_same_second_do_not_overwrite_each_other(self):
+        loader = importlib.machinery.SourceFileLoader("reprieve_binds", str(BINDS))
+        spec = importlib.util.spec_from_loader(loader.name, loader)
+        binds = importlib.util.module_from_spec(spec)
+        loader.exec_module(binds)
+        self.config.write_text(USER_CONFIG)
+        with patch.object(binds.time, "strftime", return_value="20261024120000"):
+            first = binds.write_config_atomic(str(self.config), "-- first\n")
+            second = binds.write_config_atomic(str(self.config), "-- second\n")
+        self.assertNotEqual(first, second)
+        self.assertEqual(Path(first).read_text(), USER_CONFIG)
+        self.assertEqual(Path(second).read_text(), "-- first\n")
+        self.assertEqual(self.config.read_text(), "-- second\n")
+        self.assertEqual([str(p) for p in self.backups()], [first, second])
 
     def test_backup_and_atomic_replacement(self):
         self.config.write_text(USER_CONFIG)
@@ -270,6 +300,16 @@ class BindTests(unittest.TestCase):
         # The newest survivors are the latest fakes plus the fresh backup.
         self.assertEqual(out["backup"], str(remaining[-1]))
         self.assertEqual(remaining[-1].read_text(), USER_CONFIG)
+
+    def test_pruning_orders_same_second_backups_by_number(self):
+        self.config.write_text(USER_CONFIG)
+        for suffix in ("", ".1", ".2", ".3", ".10", ".11", ".12"):
+            (self.config.parent / f"bindings.lua.bak.20200101000000{suffix}").write_text("old")
+        rc, out = run("install", config=self.config, home=self.home)
+        self.assertEqual(rc, 0)
+        stamp = "bindings.lua.bak.20200101000000"
+        names = {p.name for p in self.backups()}
+        self.assertEqual(names, {stamp + ".3", stamp + ".10", stamp + ".11", stamp + ".12", Path(out["backup"]).name})
 
     def test_no_unrelated_config_loss_through_full_cycle(self):
         original = USER_CONFIG + "\n-- trailing comment\n"
