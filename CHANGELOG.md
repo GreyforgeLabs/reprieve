@@ -2,6 +2,17 @@
 
 All notable changes to Reprieve. Versions follow SemVer.
 
+## Unreleased
+
+### Fixed
+- A parked window brought forward by its app, as when the app is launched
+  again or raises its own window, comes home as `Super+Z` would bring it.
+  Before, Hyprland focused it on the hidden park workspace or opened that
+  workspace over the user's own. The window then covered the workspace,
+  and workspace keys such as a layout toggle acted on the workspace behind
+  it. With several windows parked and none of them focused, the park
+  workspace is hidden again and the windows stay parked.
+
 ## [1.5.5] — 2026-10-25
 
 ### Fixed

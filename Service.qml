@@ -59,6 +59,11 @@ Item {
   property var model: Model.createState({ max: maxStack, parkTimeout: parkTimeout })
   property var snapshots: ({})
   property var expected: ({})
+  // The monitor showing the park workspace, "" while it is hidden
+  // (activespecialv2 events).
+  property string parkShownOn: ""
+  // A landed parked window that took focus, waiting for parkWake.
+  property string parkFocused: ""
   property var undoStack: []
   property var redoStack: []
   property int undoCount: 0
@@ -1313,6 +1318,56 @@ Item {
     }
   }
 
+  // Parked and on the park workspace: the park's move has landed. Until
+  // then the window is still in view, and its focus is the user's own.
+  function landed(address) {
+    var addr = Model.normalizeAddress(address)
+    var snap = addr ? root.snapshots[addr] : null
+    var moving = !!(root.expected[addr] && root.expected[addr].move > 0)
+    return !!snap && snap.workspace === root.parkWorkspace && !moving && Model.findParked(root.model, addr) !== -1
+  }
+
+  // Bringing a parked window forward (its app raised it, or was launched
+  // again) focuses it where it hides, or only opens the park workspace over
+  // the user's own; either way keys meant for the workspace act behind it.
+  // Reprieve never shows that workspace itself, so both mean "this one
+  // back", and parkWake settles the burst of events into one decision.
+  function handleActivated(address) {
+    if (!root.landed(address)) return
+    root.parkFocused = Model.normalizeAddress(address)
+    parkWake.restart()
+  }
+
+  function handleSpecial(data) {
+    var parts = data.split(",")
+    var monitor = parts.slice(2).join(",")
+    if (parts[1] === root.parkWorkspace) {
+      root.parkShownOn = monitor
+      parkWake.restart()
+    } else if (monitor === root.parkShownOn) {
+      root.parkShownOn = ""
+    }
+  }
+
+  // The window that took focus comes home as undo would bring it; with none,
+  // the park workspace's one window does. With several and no focus, which
+  // app asked is unknown: the workspace is only hidden.
+  function wakeParked() {
+    var address = root.landed(root.parkFocused) ? root.parkFocused : ""
+    root.parkFocused = ""
+    if (!address && root.parkShownOn) {
+      var here = Model.parkedAddresses(root.model).filter(function(a) { return root.landed(a) })
+      if (here.length === 1) address = here[0]
+    }
+    // Hidden first: once its last window has left, Hyprland closes it, and
+    // the toggle would open it again, empty.
+    if (root.parkShownOn) {
+      root.hyprDispatch('hl.dsp.workspace.toggle_special("' + root.parkWorkspace.replace(/^special:/, "") + '")')
+      root.parkShownOn = ""
+    }
+    if (address) root.restoreAddress(address, false)
+  }
+
   function handleRawEvent(name, data) {
     if (name === "openwindow") {
       var parts = data.split(",")
@@ -1336,6 +1391,10 @@ Item {
       root.patchSnapshot(fl[0], { floating: fl[1] === "1", floatingKnown: true })
     } else if (name === "fullscreen") {
       refreshDebounce.restart()
+    } else if (name === "activespecialv2") {
+      root.handleSpecial(data)
+    } else if (name === "activewindowv2") {
+      root.handleActivated(data)
     }
   }
 
@@ -1433,6 +1492,7 @@ Item {
     running: root.parkTimeout > 0 && root.parkedCount > 0
     onTriggered: root.sweepExpired()
   }
+  Timer { id: parkWake; interval: 60; repeat: false; onTriggered: root.wakeParked() }
   Timer { id: cacheDebounce; interval: 150; repeat: false; onTriggered: root.cacheToplevels() }
   Timer { id: refreshDebounce; interval: 60; repeat: false; onTriggered: { try { Hyprland.refreshToplevels() } catch (e) {}; cacheDebounce.restart() } }
 
