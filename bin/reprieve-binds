@@ -153,7 +153,11 @@ def read_config(path: str) -> str:
         data = fh.read(MAX_CONFIG_BYTES + 1)
     if len(data) > MAX_CONFIG_BYTES:
         raise BindError("config unexpectedly large")
-    return data.decode("utf-8")
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        # Refuse rather than guess: a rewrite must keep the user's bytes.
+        raise BindError(f"{path} is not valid UTF-8 (byte {exc.start}); Reprieve will not rewrite it") from None
 
 
 def write_config_atomic(path: str, text: str) -> str | None:

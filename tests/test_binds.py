@@ -179,6 +179,19 @@ class BindTests(unittest.TestCase):
         rc, out = run("status", config=self.config, home=self.home)
         self.assertIn("symlink", out["file"])
 
+    def test_non_utf8_config_is_reported_not_crashed_on(self):
+        original = b"-- caf\xe9\n" + USER_CONFIG.encode()
+        self.config.write_bytes(original)
+        rc, out = run("status", config=self.config, home=self.home)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("UTF-8", out["file"])
+        rc, out = run("install", config=self.config, home=self.home)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(out["status"], "error")
+        self.assertIn("UTF-8", out["error"])
+        self.assertEqual(self.config.read_bytes(), original)
+        self.assertEqual(self.backups(), [])
+
     def test_regular_file_refusal(self):
         self.config.mkdir()
         rc, out = run("install", config=self.config, home=self.home)

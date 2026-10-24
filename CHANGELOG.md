@@ -23,6 +23,10 @@ All notable changes to Reprieve. Versions follow SemVer.
   backups get a numbered suffix and are pruned in order.
 - Reinstalling bindings that are already current writes nothing, so it no
   longer adds a backup that pushes an older one out of the five kept.
+- A `bindings.lua` that is not valid UTF-8 is reported by
+  `reprieve-binds status` (and so by `reprieve doctor` and the setup card)
+  and refused by install and remove, which used to stop with a Python
+  traceback.
 
 ### Documentation
 - The README's trust boundaries and troubleshooting table describe the
