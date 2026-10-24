@@ -57,9 +57,15 @@ def main() -> int:
 
     if plugin_ok:
         flight = status.get("flight") or {}
-        mode = str(flight.get("mode") or "off")
-        renderer_ok = mode == "off" or (bool(flight.get("handler")) and bool(flight.get("screens")))
-        detail = "off" if mode == "off" else mode + (" (renderer ready)" if renderer_ok else " (renderer unavailable)")
+        # Removal and restoration are set separately since 1.5.4; `mode` is
+        # only their shared fallback (and all an older service reports).
+        shared = str(flight.get("mode") or "off")
+        park = str(flight.get("parkMode") or shared)
+        restore = str(flight.get("restoreMode") or shared)
+        animated = park != "off" or restore != "off"
+        renderer_ok = not animated or (bool(flight.get("handler")) and bool(flight.get("screens")))
+        mode = park if park == restore else f"removal {park}, restoration {restore}"
+        detail = "off" if not animated else mode + (" (renderer ready)" if renderer_ok else " (renderer unavailable)")
         rows.append(("Flight", detail, renderer_ok))
         if not renderer_ok:
             problems.append("flight effects are enabled but their renderer has no screen; reload the shell: omarchy restart shell")

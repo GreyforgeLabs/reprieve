@@ -45,4 +45,27 @@ class DoctorTests(unittest.TestCase):
             rc, result = self.check_flight(flight)
             self.assertEqual(rc, 0, result)
 
+    def flight_row(self, result):
+        return next(r for r in result['rows'] if r['label'] == 'Flight')
+
+    def test_both_directions_off_are_healthy_whatever_the_shared_fallback(self):
+        # 1.5.4 sets removal and restoration separately; the shared `flight`
+        # value is only their fallback and can still read "subtle".
+        rc, result = self.check_flight({'mode': 'subtle', 'parkMode': 'off', 'restoreMode': 'off',
+                                        'handler': False, 'screens': []})
+        self.assertEqual(rc, 0, result)
+        self.assertEqual(self.flight_row(result)['value'], 'off')
+
+    def test_one_animated_direction_needs_the_renderer(self):
+        rc, result = self.check_flight({'mode': 'off', 'parkMode': 'off', 'restoreMode': 'angel',
+                                        'handler': False, 'screens': []})
+        self.assertEqual(rc, 1, result)
+        self.assertTrue(any('flight' in p.lower() for p in result['problems']))
+
+    def test_split_directions_are_reported_separately(self):
+        rc, result = self.check_flight({'mode': 'subtle', 'parkMode': 'off', 'restoreMode': 'angel',
+                                        'handler': True, 'screens': ['DP-2']})
+        self.assertEqual(rc, 0, result)
+        self.assertEqual(self.flight_row(result)['value'], 'removal off, restoration angel (renderer ready)')
+
 if __name__ == '__main__': unittest.main()

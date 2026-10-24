@@ -2,6 +2,15 @@
 
 All notable changes to Reprieve. Versions follow SemVer.
 
+## Unreleased
+
+### Fixed
+- `reprieve doctor` checks the removal and restoration animations
+  separately. It used to read only the shared `flight` fallback, so with
+  both directions Off it could still fail on a missing renderer, and with
+  `flight` Off but restoration animated it skipped the renderer check. When
+  the two directions differ, the Flight row names both.
+
 ## [1.5.4] — 2026-10-19
 
 ### Added
