@@ -77,13 +77,15 @@ bar_cmd() {
   shift || true
   case "$sub" in
     status)
-      need_plugin status | python3 -c '
+      local status
+      status="$(need_plugin status)" || exit 1
+      printf '%s' "$status" | python3 -c '
 import json, sys
 d = json.load(sys.stdin); b = d.get("bar") or {}
 print("placed in bar   " + ("yes" if b.get("placed") else "no (run: reprieve bar install)"))
 print("show            " + ("on" if b.get("show", True) else "off"))
 print("tray icons      " + ("on" if b.get("tray", True) else "off") + " (max " + str(b.get("maxIcons", 5)) + ")")
-print("hide when idle  " + ("on" if b.get("hideWhenIdle", True) else "off"))
+print("hide when idle  " + ("on" if b.get("hideWhenIdle", False) else "off"))
 t = d.get("parkTimeout") or 0
 print("park timeout    " + ("off (reprieve set parkTimeout N)" if not t else str(t) + " s"))
 print("parked          " + str(d.get("parked", 0)))'
@@ -93,15 +95,22 @@ print("parked          " + str(d.get("parked", 0)))'
       # layout. Existing service-only installs have it in plugins[]; Omarchy's
       # own enable/disable is the sanctioned way to move it. The service is
       # reloaded in between; the recovery journal carries parked windows over.
-      local section="${1:-right}"
-      case "$section" in left|center|right) ;; *) echo "reprieve: section must be left, center or right" >&2; exit 2 ;; esac
+      # Without a section an already placed widget stays where it is; a new
+      # placement goes to the right.
+      local section="${1:-}"
+      case "$section" in ""|left|center|right) ;; *) echo "reprieve: section must be left, center or right" >&2; exit 2 ;; esac
       local saved
       saved="$(ipc settings)"
       if [[ "$(ipc status | python3 -c 'import json,sys; print(json.load(sys.stdin).get("entry",""))' 2>/dev/null)" == "bar" ]]; then
-        omarchy plugin enable "$PLUGIN_ID" --section "$section" >/dev/null 2>&1 || true
-        echo "reprieve: bar widget already placed"
+        if [[ -z "$section" ]]; then
+          echo "reprieve: bar widget already placed"
+          exit 0
+        fi
+        omarchy plugin enable "$PLUGIN_ID" --section "$section" >/dev/null 2>&1 || { echo "reprieve: omarchy plugin enable failed" >&2; exit 1; }
+        echo "reprieve: bar widget moved to the $section section"
         exit 0
       fi
+      section="${section:-right}"
       omarchy plugin disable "$PLUGIN_ID" >/dev/null 2>&1 || true
       omarchy plugin enable "$PLUGIN_ID" "$section" || { echo "reprieve: omarchy plugin enable failed" >&2; exit 1; }
       # Re-apply settings the plugins[] entry carried, once the service is back.

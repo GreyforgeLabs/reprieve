@@ -11,8 +11,12 @@ trap 'rm -rf "$STUB"' EXIT
 
 cat > "$STUB/omarchy-shell" <<'EOF'
 #!/usr/bin/env bash
-# STUB_MODE: parked | passthrough | empty | noactive | slow | down
+# STUB_MODE: parked | passthrough | empty | noactive | slow | down | placed
 case "${STUB_MODE:-}" in
+  placed)      case "$2" in
+                 status)   echo '{"entry":"bar","parked":0,"bar":{"placed":true}}' ;;
+                 settings) echo '{}' ;;
+               esac ;;
   parked)      echo "parked" ;;
   passthrough) echo "passthrough" ;;
   empty)       true ;;
@@ -26,7 +30,11 @@ cat > "$STUB/hyprctl" <<'EOF'
 #!/usr/bin/env bash
 echo "$*" >> "$HYPRCTL_LOG"
 EOF
-chmod +x "$STUB/omarchy-shell" "$STUB/hyprctl"
+cat > "$STUB/omarchy" <<'EOF'
+#!/usr/bin/env bash
+echo "omarchy $*" >> "$HYPRCTL_LOG"
+EOF
+chmod +x "$STUB/omarchy-shell" "$STUB/hyprctl" "$STUB/omarchy"
 
 pass=0; fail=0
 check() { # name, expected_hyprctl_calls, then command...
@@ -72,6 +80,32 @@ if [[ ! -s "$LOG" ]]; then
   pass=$((pass+1)); echo "PASS  park spawns no path-resolution helpers"
 else
   fail=$((fail+1)); echo "FAIL  park spawns no path-resolution helpers ($(tr '\n' ' ' < "$LOG"))"
+fi
+
+# `bar` subcommands: a stopped shell is reported, not a Python traceback.
+set +e
+err=$(PATH="$STUB:$PATH" HYPRCTL_LOG="$LOG" STUB_MODE=down bash bin/reprieve bar status 2>&1 >/dev/null); rc=$?
+set -e
+if [[ $rc -eq 1 && "$err" == *"plugin is not running"* && "$err" != *Traceback* ]]; then
+  pass=$((pass+1)); echo "PASS  bar status with the shell down reports it without a traceback"
+else
+  fail=$((fail+1)); echo "FAIL  bar status with the shell down reports it without a traceback (rc=$rc)"
+fi
+
+# An already placed widget stays where it is unless a section is named.
+: > "$LOG"
+out=$(PATH="$STUB:$PATH" HYPRCTL_LOG="$LOG" STUB_MODE=placed bash bin/reprieve bar install)
+if [[ ! -s "$LOG" && "$out" == *"already placed"* ]]; then
+  pass=$((pass+1)); echo "PASS  bar install without a section keeps a placed widget where it is"
+else
+  fail=$((fail+1)); echo "FAIL  bar install without a section keeps a placed widget where it is ($(tr '\n' ' ' < "$LOG")/ $out)"
+fi
+: > "$LOG"
+out=$(PATH="$STUB:$PATH" HYPRCTL_LOG="$LOG" STUB_MODE=placed bash bin/reprieve bar install center)
+if [[ "$(cat "$LOG")" == "omarchy plugin enable tech.greyforge.reprieve --section center" && "$out" == *"center section"* ]]; then
+  pass=$((pass+1)); echo "PASS  bar install SECTION moves a placed widget and says so"
+else
+  fail=$((fail+1)); echo "FAIL  bar install SECTION moves a placed widget and says so ($(tr '\n' ' ' < "$LOG")/ $out)"
 fi
 
 echo "wrapper: passed $pass, failed $fail"

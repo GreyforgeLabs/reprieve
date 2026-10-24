@@ -10,6 +10,13 @@ All notable changes to Reprieve. Versions follow SemVer.
   both directions Off it could still fail on a missing renderer, and with
   `flight` Off but restoration animated it skipped the renderer check. When
   the two directions differ, the Flight row names both.
+- `reprieve bar install` without a section leaves an already placed widget
+  where it is. It used to move it to the right section while printing
+  "already placed". `reprieve bar install SECTION` still moves it, now says
+  so, and reports a failed move.
+- `reprieve bar status` with the shell stopped prints the usual "plugin is
+  not running" message instead of a Python traceback, and reports
+  hide-when-idle as off when the service omits it (the setting's default).
 
 ## [1.5.4] — 2026-10-19
 
