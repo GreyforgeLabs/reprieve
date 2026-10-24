@@ -78,4 +78,14 @@ class DoctorTests(unittest.TestCase):
         self.assertIn('UTF-8', row['value'])
         self.assertFalse(row['ok'])
 
+    def test_unreadable_bindings_file_does_not_advise_setup(self):
+        # The block may be in the file and live; setup would refuse the file.
+        rc, result = self.check_flight({'mode': 'off'}, binds={
+            'installed': False, 'live': {'park': True}, 'conflicts': [],
+            'file': 'bindings.lua is not valid UTF-8 (byte 6); Reprieve will not rewrite it'})
+        self.assertEqual(rc, 1)
+        row = next(r for r in result['rows'] if r['label'] == 'Bindings')
+        self.assertEqual(row['value'], 'live')
+        self.assertFalse(any('reprieve setup' in p for p in result['problems']), result['problems'])
+
 if __name__ == '__main__': unittest.main()

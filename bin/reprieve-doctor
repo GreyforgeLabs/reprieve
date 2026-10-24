@@ -116,6 +116,11 @@ def main() -> int:
         elif installed:
             rows.append(("Bindings", "installed, not live (reload Hyprland)", False))
             problems.append("bindings are in bindings.lua but Hyprland has not loaded them: hyprctl reload")
+        elif file_problem != "ok":
+            # An unreadable file says nothing about whether the block is in
+            # it, and `reprieve setup` would refuse it; report what Hyprland
+            # has loaded and leave the advice to the row above.
+            rows.append(("Bindings", "live" if live.get("park") else "unknown", bool(live.get("park"))))
         else:
             rows.append(("Bindings", "not installed", False))
             problems.append("keybindings not installed; run: reprieve setup")
