@@ -248,11 +248,14 @@ Reprieve Doctor
 Hyprland         OK
 Session          example-session…
 Plugin           OK
+Flight           subtle (renderer ready)
 Journal          OK
 Parked windows   2
 Stranded         0
 Bindings         OK
 Conflicts        none
+Bar widget       placed
+Park timeout     off
 Media helper     OK
 
 PASS
@@ -326,8 +329,11 @@ Colours follow the active Omarchy theme; there is nothing to configure there.
 - Every file Reprieve writes goes through temp-file-and-rename with size
   limits; symlinks and non-regular files are refused; unreadable state is
   quarantined rather than parsed.
-- The audio helper is standard-library Python with a two-second hard stop, and
-  only acts on streams whose pid matches the hidden window.
+- The media helper is standard-library Python plus `busctl`, with a two-second
+  hard stop. It pauses only MPRIS players whose bus name carries a PID from the
+  hidden window's process tree or matches its application, and a restore
+  resumes only the players it paused. It never changes mute or volume; `pactl`
+  is used only to undo mutes recorded by releases before 1.1.1.
 
 Reporting: see [SECURITY.md](SECURITY.md).
 
@@ -345,7 +351,7 @@ and then running `hyprctl reload` lets Reprieve's installed binding stay active.
 | `Super+W` still terminates windows            | `reprieve doctor`. "installed, not live" → `hyprctl reload`; "not installed" → `reprieve setup` |
 | A window disappeared and is not in the timeline | `reprieve doctor` reports it under `Stranded`; `reprieve restore-all` returns everything on the hidden workspace |
 | `reprieve clear` refuses                      | Intentional — it will not forget windows that are still alive. Use `restore-all` or `reset` |
-| Audio stayed muted after a return             | The app's stream index changed while hidden. Unmute from the Audio widget; Reprieve only touches streams whose pid still matches |
+| Audio stayed muted after a return             | Only releases before 1.1.1 muted on park; current versions pause players instead. Unmute the application in the Audio widget (see the audio note under Settings) |
 | Setup reports a shortcut in use               | `A` for the alternate, `R` to replace, Enter to skip it. `omarchy menu keybindings --print` shows the current owner |
 
 ## Removal

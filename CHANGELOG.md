@@ -24,6 +24,12 @@ All notable changes to Reprieve. Versions follow SemVer.
 - Reinstalling bindings that are already current writes nothing, so it no
   longer adds a backup that pushes an older one out of the five kept.
 
+### Documentation
+- The README's trust boundaries and troubleshooting table describe the
+  current media helper (MPRIS pause and resume, no mute changes) instead of
+  the stream muting that ended in 1.1.1, and the `reprieve doctor` sample
+  shows every row the command prints.
+
 ## [1.5.4] — 2026-10-19
 
 ### Added
