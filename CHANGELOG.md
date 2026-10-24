@@ -26,7 +26,8 @@ All notable changes to Reprieve. Versions follow SemVer.
 - A `bindings.lua` that is not valid UTF-8 is reported by
   `reprieve-binds status` (and so by `reprieve doctor` and the setup card)
   and refused by install and remove, which used to stop with a Python
-  traceback.
+  traceback. `reprieve doctor` names any bindings file it cannot read
+  safely (symlink, oversized, not UTF-8) on its own row.
 
 ### Documentation
 - The README's trust boundaries and troubleshooting table describe the

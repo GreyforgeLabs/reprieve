@@ -17,13 +17,14 @@ doctor = importlib.util.module_from_spec(spec)
 loader.exec_module(doctor)
 
 class DoctorTests(unittest.TestCase):
-    def check_flight(self, flight):
+    def check_flight(self, flight, binds=None):
         status = {'parked': 0, 'addresses': [], 'flight': flight, 'bar': {'placed': True}}
+        binds = binds or {'installed': True, 'live': {'park': True}, 'conflicts': []}
         def run(cmd, timeout=2):
             if cmd[0] == 'hyprctl': return 0, '[]'
             if cmd[0] == 'omarchy-shell': return 0, json.dumps(status)
             if 'inspect' in cmd: return 0, '{"status":"empty"}'
-            return 0, '{"installed":true,"live":{"park":true},"conflicts":[]}'
+            return 0, json.dumps(binds)
         output = io.StringIO()
         with patch.object(doctor, 'run', run), patch.object(doctor.shutil, 'which', return_value='/fixture/bin'), \
              patch.dict(os.environ, {'HYPRLAND_INSTANCE_SIGNATURE': 'test-session'}), \
@@ -67,5 +68,14 @@ class DoctorTests(unittest.TestCase):
                                         'handler': True, 'screens': ['DP-2']})
         self.assertEqual(rc, 0, result)
         self.assertEqual(self.flight_row(result)['value'], 'removal off, restoration angel (renderer ready)')
+
+    def test_unreadable_bindings_file_is_named(self):
+        rc, result = self.check_flight({'mode': 'off'}, binds={
+            'installed': False, 'live': {}, 'conflicts': [],
+            'file': 'bindings.lua is not valid UTF-8 (byte 6); Reprieve will not rewrite it'})
+        self.assertEqual(rc, 1)
+        row = next(r for r in result['rows'] if r['label'] == 'Bindings file')
+        self.assertIn('UTF-8', row['value'])
+        self.assertFalse(row['ok'])
 
 if __name__ == '__main__': unittest.main()

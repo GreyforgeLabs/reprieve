@@ -105,6 +105,10 @@ def main() -> int:
         rows.append(("Bindings", "unknown", False))
         problems.append("could not inspect bindings.lua")
     else:
+        file_problem = str(binds.get("file") or "ok")
+        if file_problem != "ok":
+            rows.append(("Bindings file", file_problem, False))
+            problems.append("bindings.lua cannot be read safely; fix the file named above by hand")
         installed = bool(binds.get("installed"))
         live = binds.get("live") or {}
         if installed and live.get("park"):
