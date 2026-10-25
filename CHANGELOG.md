@@ -2,7 +2,7 @@
 
 All notable changes to Reprieve. Versions follow SemVer.
 
-## Unreleased
+## [1.5.5] — 2026-10-25
 
 ### Fixed
 - `reprieve doctor` checks the removal and restoration animations
