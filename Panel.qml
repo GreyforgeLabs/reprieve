@@ -825,7 +825,7 @@ Item {
         Flow {
           width: parent.width
           spacing: Style.space(12)
-          Keycap { key: "L"; label: "later"; foreground: root.foreground; fontFamily: root.fontFamily; fontSize: Style.font.caption }
+          Keycap { key: "L"; label: "don't ask again"; foreground: root.foreground; fontFamily: root.fontFamily; fontSize: Style.font.caption }
           Keycap { key: "Esc"; label: "close"; foreground: root.foreground; fontFamily: root.fontFamily; fontSize: Style.font.caption }
           Keycap { visible: !root.needsSetup; key: "T"; label: "timeline"; foreground: root.foreground; fontFamily: root.fontFamily; fontSize: Style.font.caption }
         }
