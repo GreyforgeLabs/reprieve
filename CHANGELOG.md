@@ -2,6 +2,13 @@
 
 All notable changes to Reprieve. Versions follow SemVer.
 
+## [Unreleased]
+
+### Changed
+- The setup card's `L` key reads "don't ask again" instead of "later". It
+  always stopped the card from opening on its own (`reprieve setup` still
+  opens it), and the label now says so.
+
 ## [1.5.5] — 2026-10-25
 
 ### Fixed

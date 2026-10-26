@@ -77,8 +77,8 @@ pick an alternate (`A`), overwrite it (`R`), or go without (Enter). A
 `Super+W` you have customised yourself is left alone unless you explicitly
 choose `R`.
 
-Bring the card back any time with `reprieve setup`. Press `L` on it to opt
-out permanently.
+Bring the card back any time with `reprieve setup`. Press `L` ("don't ask
+again") and it stops opening on its own; `reprieve setup` still opens it.
 
 After upgrading from 1.5.2 or earlier, open `reprieve setup` and choose
 **Reinstall keybindings** to add the parked-window focus rule to your managed
@@ -104,6 +104,11 @@ Two outcomes exist in the timeline, and Reprieve is careful to tell them apart:
 Parking is not a cut. A snapshot of the window lifts off, glides into the
 Reprieve mark in the bar and the mark flares as it lands; restoring flies
 it back out and the live window takes over the instant it touches down.
+
+<p align="center">
+  <img src="docs/screenshots/flight.gif" alt="A terminal window carried into the bar mark by the angel flight, then flown back to its tile on restore" width="720">
+</p>
+
 The animation can be chosen separately for removal and restoration:
 `off` keeps the plain cut, `subtle` glides the snapshot, and `angel` sends a
 winged light to carry it.
@@ -147,10 +152,11 @@ is not persisted).
 Inside the overlay: **Enter** returns the row to its original workspace,
 **Space** pulls it onto the one you are looking at, **A** returns everything,
 **Y** re-parks the last one, **Del** twice on the same row terminates it for
-good, **Esc** dismisses. The strip under Restore All holds the preferences:
-**T** toggles the corner toast, **M** toggles pausing audio on park, and
+good, **Esc** dismisses. The panel under Restore All holds the preferences:
+**T** toggles the corner toast, **M** toggles pausing audio on park,
 **P** steps the auto-close timeout through Off, 15 s, 30 s, 1 min and 2 min
-(Shift+P or right-click steps back; the CLI accepts any value in 5–120 s).
+(Shift+P or right-click steps back; the CLI accepts any value in 5–120 s),
+and **F** and **R** pick the removal and restoration animations.
 
 ## The bar widget
 
@@ -159,7 +165,7 @@ things went. Reprieve's widget is placed in the right section on install and
 has three parts:
 
 <p align="center">
-  <img src="docs/screenshots/bar-and-toast.png" alt="The Reprieve bar widget and toast" width="420">
+  <img src="docs/screenshots/bar-and-toast.png" alt="The Reprieve mark with an amber dot and two parked terminal icons in the bar, above the toast: Parked release-notes.md - nvim, Super+Z to undo" width="590">
 </p>
 
 - the angel mark as a status glyph: a status dot rides its lower-left
@@ -185,10 +191,6 @@ reprieve bar icons 8          # icons before collapsing to +N (1–10)
 reprieve bar show off         # remove from the bar; the service keeps running
 reprieve bar install center   # place it, or move it to another section
 ```
-
-Moving to 1.1 from 1.0? Run `reprieve bar install` once; it relocates the
-plugin's config entry into the bar layout using Omarchy's own enable/disable
-cycle and carries your settings across.
 
 ## Built to survive its own failures
 
@@ -308,14 +310,6 @@ or volume. Players without MPRIS pause support may keep playing while hidden.
 Browsers can share a player across windows, so pausing one window may also
 pause another window's playback.
 
-**Audio muted after using an older release?** Versions 1.0.0 and 1.1.0 muted
-application streams on park. If a stream disappeared or was replaced while
-parked, its saved mute could survive restore and browser restarts. Start
-playback and unmute the affected application in the Audio widget. Version 1.1.1 prevents new parking mutes. If you cannot update yet,
-`reprieve set pauseMediaOnPark false` prevents new parking mutes, but parked
-windows may keep playing. Updating or disabling this setting does not clear a
-mute that is already saved. See [the audio incident record](docs/AUDIO-MUTE.md).
-
 Colours follow the active Omarchy theme; there is nothing to configure there.
 
 ## Trust boundaries
@@ -339,19 +333,18 @@ Reporting: see [SECURITY.md](SECURITY.md).
 
 ## When something looks wrong
 
-Older Omarchy Control Panel versions can overwrite Reprieve's `Super+W`
-binding from their five-second watchdog. The
-[companion ownership fix](https://github.com/avillagran/omarchy-control-panel/pull/1)
-is proposed upstream. Until an affected installation includes it, disabling
-Control Panel with `omarchy plugin disable io.github.avillagran.omarchy-control-panel`
-and then running `hyprctl reload` lets Reprieve's installed binding stay active.
+Some versions of Omarchy Control Panel run a five-second watchdog that writes their own
+`Super+W` binding back over Reprieve's. If `Super+W` closes windows again a
+few seconds after setup while Control Panel is installed, disable it with
+`omarchy plugin disable io.github.avillagran.omarchy-control-panel`, then run
+`hyprctl reload`; Reprieve's installed binding then stays active.
 
 | Symptom                                       | What to do                                                                 |
 | --------------------------------------------- | -------------------------------------------------------------------------- |
 | `Super+W` still terminates windows            | `reprieve doctor`. "installed, not live" → `hyprctl reload`; "not installed" → `reprieve setup` |
 | A window disappeared and is not in the timeline | `reprieve doctor` reports it under `Stranded`; `reprieve restore-all` returns everything on the hidden workspace |
 | `reprieve clear` refuses                      | Intentional — it will not forget windows that are still alive. Use `restore-all` or `reset` |
-| Audio stayed muted after a return             | Only releases before 1.1.1 muted on park; current versions pause players instead. Unmute the application in the Audio widget (see the audio note under Settings) |
+| Audio stayed muted after a return             | Only releases before 1.1.1 muted on park; current versions pause players instead. Unmute the application in the Audio widget; [docs/AUDIO-MUTE.md](docs/AUDIO-MUTE.md) has the details |
 | Setup reports a shortcut in use               | `A` for the alternate, `R` to replace, Enter to skip it. `omarchy menu keybindings --print` shows the current owner |
 
 ## Removal
@@ -365,11 +358,12 @@ rm -rf ~/.local/state/reprieve
 Only Reprieve's own block leaves `bindings.lua`; `Super+W` reverts to
 Omarchy's default close.
 
-## License
+## Development
 
-MIT — © 2026 Greyforge Labs. See [LICENSE](LICENSE).
-
-### Working on a local installation
+```sh
+bash tests/run.sh   # offline suite: model, service, journal, binds, doctor, media
+make native         # optional C journal (needs a C compiler and json-c headers)
+```
 
 On the installed Omarchy version, Reprieve's `keepLoaded` service survives a
 plugin rescan. Saving QML or running `omarchy-shell shell rescanPlugins` can
@@ -387,3 +381,13 @@ windows are parked and restores effective settings afterwards. Set
 this uses window focus and should run while the desktop is otherwise idle.
 See [the September 30 bug-hunt record](docs/BUG-HUNT-2026-09-30.md) for
 verification scope and retained evidence.
+
+## License
+
+MIT — © 2026 Greyforge Labs. See [LICENSE](LICENSE).
+
+---
+
+<p align="center">
+  <b>Saved a window?</b> <a href="https://github.com/GreyforgeLabs/reprieve">Star Reprieve on GitHub</a> · <a href="https://x.com/GreyforgeLabs">Follow @GreyforgeLabs</a> · <a href="https://greyforge.tech/open-source">More Omarchy tools at greyforge.tech</a>
+</p>
