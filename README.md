@@ -108,6 +108,7 @@ it back out and the live window takes over the instant it touches down.
 <p align="center">
   <img src="docs/screenshots/flight.gif" alt="A terminal window carried into the bar mark by the angel flight, then flown back to its tile on restore" width="720">
 </p>
+
 The animation can be chosen separately for removal and restoration:
 `off` keeps the plain cut, `subtle` glides the snapshot, and `angel` sends a
 winged light to carry it.
