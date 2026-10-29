@@ -56,7 +56,7 @@ function service(options = {}) {
   const journalWriter = {running: false, payload: "", command: []}
   const context = vm.createContext({root, Model, Hyprland, console, Date, journalWriter,
     quarantineProcess: {running: false}, cacheDebounce: timer, refreshDebounce: timer, adoptTimer: timer,
-    parkGeometryReader, flightWatchdog: timer, expectSweep: timer, persistDebounce: timer, animClear: timer,
+    parkGeometryReader, flightWatchdog: timer, parkWake: timer, expectSweep: timer, persistDebounce: timer, animClear: timer,
     toastTimer: timer, mediaProcess: {running: false}, mediaTimeout: timer,
     Quickshell: {execDetached() {}}, Qt: {callLater() {}}})
   const source = fs.readFileSync(process.env.REPRIEVE_SERVICE_SOURCE || require.resolve("../Service.qml"), "utf8")
@@ -395,5 +395,96 @@ test("the legacy shared setting resets both directions even when its value is un
   assert.equal(s.root.settingsEntry.parkFlight, "subtle")
   assert.equal(s.root.settingsEntry.restoreFlight, "subtle")
   assert.equal(writes, 1)
+})
+// Bringing a parked window forward: Hyprland reports a focus, a shown park
+// workspace, or both; the decision runs once the burst settles (parkWake).
+function parked(options) {
+  const s = service(options)
+  s.root.cacheToplevels()
+  s.root.parkWindow("0xabc"); s.root.flightCut(s.jobs[0].token)
+  assert.equal(s.handle.workspace.name, Model.PARK_WORKSPACE)
+  return s
+}
+function settle(s) {
+  s.root.wakeParked()
+  for (const job of s.jobs.slice(1)) s.root.flightCut(job.token)
+}
+const hides = s => s.dispatches.filter(d => d.includes('toggle_special("reprieve")')).length
+test("a parked window that takes focus comes home, as undo would bring it", () => {
+  const s = parked()
+  // Its app raised it (launched again): Hyprland focused it where it hides.
+  s.root.handleRawEvent("activewindowv2", "abc")
+  settle(s)
+  assert.equal(s.handle.workspace.name, "2")
+  assert.equal(Model.findParked(s.root.model, "0xabc"), -1)
+  assert.ok(s.dispatches.some(d => d.includes("hl.dsp.focus") && d.includes("address:0xabc")), "the window was not focused at home")
+  assert.equal(hides(s), 0, "the park workspace was not on screen")
+})
+test("the park workspace shown without a focus brings its one window home", () => {
+  const s = parked()
+  // A focus dispatch for the hidden window only opens its workspace.
+  s.root.handleRawEvent("activespecialv2", "-98,special:reprieve,DP-2")
+  settle(s)
+  assert.equal(s.handle.workspace.name, "2")
+  assert.equal(hides(s), 1)
+  const hide = s.dispatches.findIndex(d => d.includes("toggle_special"))
+  const home = s.dispatches.findIndex(d => d.includes("window.move") && d.includes('workspace = "2"'))
+  assert.ok(hide < home, "hidden after the last window left, the toggle would open it again, empty")
+})
+test("a shown park workspace with several windows and no focus is only hidden", () => {
+  const s = parked()
+  s.root.model = Model.pushPark(s.root.model, {address: "0xdef", class: "foot", title: "Other", workspace: "3"}).state
+  s.root.patchSnapshot("0xdef", {workspace: Model.PARK_WORKSPACE, workspaceKnown: true})
+  s.root.handleRawEvent("activespecialv2", "-98,special:reprieve,DP-2")
+  settle(s)
+  assert.equal(hides(s), 1)
+  assert.equal(Model.findParked(s.root.model, "0xabc") !== -1 && Model.findParked(s.root.model, "0xdef") !== -1, true)
+})
+test("the focused one of several comes home with the park workspace hidden", () => {
+  const s = parked()
+  s.root.model = Model.pushPark(s.root.model, {address: "0xdef", class: "foot", title: "Other", workspace: "3"}).state
+  s.root.patchSnapshot("0xdef", {workspace: Model.PARK_WORKSPACE, workspaceKnown: true})
+  s.root.handleRawEvent("activewindowv2", "abc")
+  s.root.handleRawEvent("activespecialv2", "-98,special:reprieve,DP-2")
+  settle(s)
+  assert.equal(s.handle.workspace.name, "2")
+  assert.equal(hides(s), 1)
+  assert.notEqual(Model.findParked(s.root.model, "0xdef"), -1, "the other parked window stays parked")
+})
+test("focus during a park still in flight leaves the park alone", () => {
+  const {root, handle} = service()
+  root.cacheToplevels()
+  root.parkWindow("0xabc")
+  // Before the cut the window is still in view, and its focus is the user's.
+  root.handleRawEvent("activewindowv2", "abc")
+  root.wakeParked()
+  assert.equal(Model.findParked(root.model, "0xabc"), 0)
+  assert.equal(handle.workspace.name, "2")
+})
+test("a focus event older than the park's move leaves the park alone", () => {
+  const {root, handle, jobs, context} = service()
+  const dispatch = context.Hyprland.dispatch
+  let held = null
+  context.Hyprland.dispatch = lua => { if (lua.includes("window.move")) held = lua; else dispatch(lua) }
+  root.cacheToplevels()
+  root.parkWindow("0xabc"); root.flightCut(jobs[0].token)
+  // Hyprland reports the focus it had before handling the move.
+  root.handleRawEvent("activewindowv2", "abc")
+  root.wakeParked()
+  context.Hyprland.dispatch = dispatch
+  dispatch(held)
+  assert.equal(Model.findParked(root.model, "0xabc"), 0)
+  assert.equal(handle.workspace.name, Model.PARK_WORKSPACE)
+})
+test("focus elsewhere, or the park workspace hidden again, changes nothing", () => {
+  const s = parked()
+  const before = s.dispatches.length
+  s.root.handleRawEvent("activewindowv2", "")
+  s.root.handleRawEvent("activewindowv2", "def")
+  s.root.handleRawEvent("activespecialv2", "-98,special:reprieve,DP-2")
+  s.root.handleRawEvent("activespecialv2", ",,DP-2")
+  s.root.wakeParked()
+  assert.equal(s.dispatches.length, before)
+  assert.equal(Model.findParked(s.root.model, "0xabc"), 0)
 })
 if (failures) process.exit(1)
